@@ -1,7 +1,6 @@
 .vscode/
 .github/
 build/
-configs/
 Camera/
 logs/
 assets/img_with_q/
