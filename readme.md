@@ -348,4 +348,4 @@ DPS = 单位时间射击窗口占比 \times 射频 \times 单发子弹伤害
 
 
 ## Star History
-[![Star History Chart](https://api.star-history.com/svg?repos=TongjiSuperPower/sp_vision_25&type=Date)](https://www.star-history.com/#TongjiSuperPower/sp_vision_25&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=PnX-HKUSTGZ/auto-aim-new&type=Date)](https://www.star-history.com/#PnX-HKUSTGZ/auto-aim-new&Date)
