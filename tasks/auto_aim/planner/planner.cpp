@@ -1,5 +1,7 @@
 #include "planner.hpp"
 
+#include <cmath>
+#include <limits>
 #include <vector>
 
 #include "tools/math_tools.hpp"
@@ -10,12 +12,44 @@ using namespace std::chrono_literals;
 
 namespace auto_aim
 {
+namespace
+{
+double shortest_angular_distance(double a, double b)
+{
+  return tools::limit_rad(a - b);
+}
+
+double armor_cost(const Target & target, const Eigen::Vector4d & xyza)
+{
+  const auto ekf_x = target.ekf_x();
+  const auto gun_to_center_angle = std::atan2(ekf_x[2], ekf_x[0]);
+  return std::abs(shortest_angular_distance(gun_to_center_angle, xyza[3]));
+}
+
+int selected_armor_id(const Target & target, const std::vector<Eigen::Vector4d> & armor_xyza_list)
+{
+  auto min_cost = std::numeric_limits<double>::max();
+  auto min_id = 0;
+
+  for (int i = 0; i < static_cast<int>(armor_xyza_list.size()); i++) {
+    auto cost = armor_cost(target, armor_xyza_list[i]);
+    if (cost < min_cost) {
+      min_cost = cost;
+      min_id = i;
+    }
+  }
+
+  return min_id;
+}
+}  // namespace
+
 Planner::Planner(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
   yaw_offset_ = tools::read<double>(yaml, "yaw_offset") / 57.3;
   pitch_offset_ = tools::read<double>(yaml, "pitch_offset") / 57.3;
   fire_thresh_ = tools::read<double>(yaml, "fire_thresh");
+  switch_dist_diff_thresh_ = tools::read<double>(yaml, "switch_dist_diff_thresh");
   decision_speed_ = tools::read<double>(yaml, "decision_speed");
   high_speed_delay_time_ = tools::read<double>(yaml, "high_speed_delay_time");
   low_speed_delay_time_ = tools::read<double>(yaml, "low_speed_delay_time");
@@ -32,22 +66,17 @@ Plan Planner::plan(Target target, double bullet_speed)
   }
 
   // 1. Predict fly_time
-  Eigen::Vector3d xyz;
-  auto min_dist = 1e10;
-  for (auto & xyza : target.armor_xyza_list()) {
-    auto dist = xyza.head<2>().norm();
-    if (dist < min_dist) {
-      min_dist = dist;
-      xyz = xyza.head<3>();
-    }
-  }
-  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
-  target.predict(bullet_traj.fly_time);
+  auto armor_xyza_list = target.armor_xyza_list();
+  auto xyza = armor_xyza_list[selected_armor_id(target, armor_xyza_list)];
+  auto xyz = xyza.head<3>();
+  auto aim_dist = xyza.head<2>().norm();
+  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z());
+  target.predict(bullet_traj.fly_time); // 预测飞行时间
 
   // 2. Get trajectory
   double yaw0;
   Trajectory traj;
-  try {
+  try { // 生成参考轨迹
     yaw0 = aim(target, bullet_speed)(0);
     traj = get_trajectory(target, yaw0, bullet_speed);
   } catch (const std::exception & e) {
@@ -155,22 +184,23 @@ void Planner::setup_pitch_solver(const std::string & config_path)
 
 Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_speed)
 {
-  Eigen::Vector3d xyz;
-  double yaw;
-  auto min_dist = 1e10;
+  auto armor_xyza_list = target.armor_xyza_list();
+  auto min_id = selected_armor_id(target, armor_xyza_list);
 
-  for (auto & xyza : target.armor_xyza_list()) {
-    auto dist = xyza.head<2>().norm();
-    if (dist < min_dist) {
-      min_dist = dist;
-      xyz = xyza.head<3>();
-      yaw = xyza[3];
-    }
-  }
+  if (lock_id_ < 0 || lock_id_ >= static_cast<int>(armor_xyza_list.size())) lock_id_ = min_id;
+
+  auto locked_cost = armor_cost(target, armor_xyza_list[lock_id_]);
+  auto min_cost = armor_cost(target, armor_xyza_list[min_id]);
+  if (locked_cost - min_cost > switch_dist_diff_thresh_) lock_id_ = min_id;
+
+  auto xyza = armor_xyza_list[lock_id_];
+  auto xyz = xyza.head<3>();
+  auto yaw = xyza[3];
+  auto aim_dist = xyza.head<2>().norm();
   debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
 
   auto azim = std::atan2(xyz.y(), xyz.x());
-  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
+  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z());
   if (bullet_traj.unsolvable) throw std::runtime_error("Unsolvable bullet trajectory!");
 
   return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};

@@ -106,9 +106,9 @@ void Gimbal::send(
   tx_data_.yaw = yaw;
   tx_data_.yaw_vel = yaw_vel;
   tx_data_.yaw_acc = yaw_acc;
-  tx_data_.pitch = pitch;
-  tx_data_.pitch_vel = pitch_vel;
-  tx_data_.pitch_acc = pitch_acc;
+  tx_data_.pitch = -pitch;
+  tx_data_.pitch_vel = -pitch_vel;
+  tx_data_.pitch_acc = -pitch_acc;
   tx_data_.crc16 = tools::get_crc16(
     reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
 
