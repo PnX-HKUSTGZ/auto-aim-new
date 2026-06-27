@@ -11,6 +11,7 @@ Aimer::Aimer(const std::string & config_path)
   auto yaml = YAML::LoadFile(config_path);
   yaw_offset_ = yaml["yaw_offset"].as<double>() / 57.3;      // degree to rad
   pitch_offset_ = yaml["pitch_offset"].as<double>() / 57.3;  // degree to rad
+  air_resistance_ = yaml["air_resistance"].as<double>();
   fire_gap_time_ = yaml["fire_gap_time"].as<double>();
   predict_time_ = yaml["predict_time"].as<double>();
 
@@ -163,7 +164,7 @@ bool Aimer::get_send_angle(
   double h = aim_in_world[2];
 
   // 创建弹道对象
-  tools::Trajectory trajectory0(bullet_speed, d, h);
+  tools::Trajectory trajectory0(bullet_speed, d, h, air_resistance_);
   if (trajectory0.unsolvable) {  // 如果弹道无法解算，返回未命中结果
     tools::logger()->debug(
       "[Aimer] Unsolvable trajectory0: {:.2f} {:.2f} {:.2f}", bullet_speed, d, h);
@@ -178,7 +179,7 @@ bool Aimer::get_send_angle(
   aim_in_world = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.7));
   d = fsqrt(aim_in_world[0] * aim_in_world[0] + aim_in_world[1] * aim_in_world[1]);
   h = aim_in_world[2];
-  tools::Trajectory trajectory1(bullet_speed, d, h);
+  tools::Trajectory trajectory1(bullet_speed, d, h, air_resistance_);
   if (trajectory1.unsolvable) {  // 如果弹道无法解算，返回未命中结果
     tools::logger()->debug(
       "[Aimer] Unsolvable trajectory1: {:.2f} {:.2f} {:.2f}", bullet_speed, d, h);

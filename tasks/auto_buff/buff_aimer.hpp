@@ -36,6 +36,7 @@ private:
   SmallTarget target_;
   double yaw_offset_;
   double pitch_offset_;
+  double air_resistance_ = 0.1;
 
   double fire_gap_time_;
   double predict_time_;

@@ -45,6 +45,7 @@ private:
   double fire_thresh_;
   double switch_dist_diff_thresh_;
   double low_speed_delay_time_, high_speed_delay_time_, decision_speed_;
+  double air_resistance_ = 0.1;
   int lock_id_ = -1;
 
   TinySolver * yaw_solver_;

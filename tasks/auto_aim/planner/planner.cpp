@@ -48,6 +48,7 @@ Planner::Planner(const std::string & config_path)
   auto yaml = tools::load(config_path);
   yaw_offset_ = tools::read<double>(yaml, "yaw_offset") / 57.3;
   pitch_offset_ = tools::read<double>(yaml, "pitch_offset") / 57.3;
+  air_resistance_ = yaml["air_resistance"].as<double>();
   fire_thresh_ = tools::read<double>(yaml, "fire_thresh");
   switch_dist_diff_thresh_ = tools::read<double>(yaml, "switch_dist_diff_thresh");
   decision_speed_ = tools::read<double>(yaml, "decision_speed");
@@ -70,7 +71,7 @@ Plan Planner::plan(Target target, double bullet_speed)
   auto xyza = armor_xyza_list[selected_armor_id(target, armor_xyza_list)];
   auto xyz = xyza.head<3>();
   auto aim_dist = xyza.head<2>().norm();
-  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z());
+  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z(), air_resistance_);
   target.predict(bullet_traj.fly_time); // 预测飞行时间
 
   // 2. Get trajectory
@@ -200,7 +201,7 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
 
   auto azim = std::atan2(xyz.y(), xyz.x());
-  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z());
+  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z(), air_resistance_);
   if (bullet_traj.unsolvable) throw std::runtime_error("Unsolvable bullet trajectory!");
 
   return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};

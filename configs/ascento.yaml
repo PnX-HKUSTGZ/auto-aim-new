@@ -40,6 +40,7 @@ outpost_max_temp_lost_count: 75
 #####-----aimer参数-----#####
 yaw_offset: 1.5 # degree
 pitch_offset: -0.5 # degree
+air_resistance: 0.1 # air drag coefficient
 comming_angle: 60 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
