@@ -50,6 +50,7 @@ int main(int argc, char * argv[])
 
   cv::Mat img, drawing;
   auto t0 = std::chrono::steady_clock::now();
+  auto last_reprojection_time = std::chrono::steady_clock::now();
 
   auto_aim::Target last_target;
   io::Command last_command;
@@ -189,6 +190,10 @@ int main(int argc, char * argv[])
     plotter.plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
+    auto now = std::chrono::steady_clock::now();
+    auto dt = tools::delta_time(now, last_reprojection_time);
+    last_reprojection_time = now;
+    tools::draw_text(img, fmt::format("FPS: {:.1f}", 1.0 / dt), {10, 120}, {255, 255, 255});
     cv::imshow("reprojection", img);
     auto key = cv::waitKey(30);
     if (key == 'q') break;

@@ -106,6 +106,7 @@ int main(int argc, char * argv[])
 
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
+  auto last_reprojection_time = std::chrono::steady_clock::now();
 
   while (!exiter.exit()) {
     camera.read(img, t);
@@ -137,6 +138,10 @@ int main(int argc, char * argv[])
     }
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
+    auto now = std::chrono::steady_clock::now();
+    auto dt = tools::delta_time(now, last_reprojection_time);
+    last_reprojection_time = now;
+    tools::draw_text(img, fmt::format("FPS: {:.1f}", 1.0 / dt), {10, 60}, {255, 255, 255});
     cv::imshow("reprojection", img);
     auto key = cv::waitKey(1);
     if (key == 'q') break;

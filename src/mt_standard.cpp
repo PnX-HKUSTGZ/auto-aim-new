@@ -3,7 +3,7 @@
 #include <thread>
 
 #include "io/camera.hpp"
-#include "io/dm_imu/dm_imu.hpp"
+#include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
@@ -41,9 +41,8 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
   tools::Recorder recorder;
 
+  io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
-  io::CBoard cboard(config_path);
-
   auto_aim::multithread::MultiThreadDetector detector(config_path);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
@@ -56,17 +55,30 @@ int main(int argc, char * argv[])
   auto_buff::BigTarget buff_big_target;
   auto_buff::Aimer buff_aimer(config_path);
 
-  auto_aim::multithread::CommandGener commandgener(shooter, aimer, cboard, plotter);
+  auto_aim::multithread::CommandGener commandgener(shooter, aimer, gimbal, plotter);
 
-  std::atomic<io::Mode> mode{io::Mode::idle};
-  auto last_mode{io::Mode::idle};
+  std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
+  auto last_mode{io::GimbalMode::IDLE};
+  auto fps_last_time = std::chrono::steady_clock::now();
+  int fps_frame_count = 0;
+
+  auto log_fps = [&]() {
+    fps_frame_count++;
+    auto now = std::chrono::steady_clock::now();
+    auto dt = tools::delta_time(now, fps_last_time);
+    if (dt >= 1.0) {
+      tools::logger()->info("mt_standard FPS: {:.1f}", fps_frame_count / dt);
+      fps_frame_count = 0;
+      fps_last_time = now;
+    }
+  };
 
   auto detect_thread = std::thread([&]() {
     cv::Mat img;
     std::chrono::steady_clock::time_point t;
 
     while (!exiter.exit()) {
-      if (mode.load() == io::Mode::auto_aim) {
+      if (mode.load() == io::GimbalMode::AUTO_AIM) {
         camera.read(img, t);
         detector.push(img, t);
       } else
@@ -75,17 +87,18 @@ int main(int argc, char * argv[])
   });
 
   while (!exiter.exit()) {
-    mode = cboard.mode;
+    mode = gimbal.mode();
 
     if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", io::MODES[mode]);
+      tools::logger()->info("Switch to {}", gimbal.str(mode));
       last_mode = mode.load();
     }
 
     /// 自瞄
-    if (mode.load() == io::Mode::auto_aim) {
+    if (mode.load() == io::GimbalMode::AUTO_AIM) {
       auto [img, armors, t] = detector.debug_pop();
-      Eigen::Quaterniond q = cboard.imu_at(t - 1ms);
+      Eigen::Quaterniond q = gimbal.q(t);
+      auto gs = gimbal.state();
 
       // recorder.record(img, q, t);
 
@@ -95,18 +108,20 @@ int main(int argc, char * argv[])
 
       auto targets = tracker.track(armors, t);
 
-      commandgener.push(targets, t, cboard.bullet_speed, ypr);  // 发送给决策线程
+      commandgener.push(targets, t, gs.bullet_speed, ypr);  // 发送给决策线程
+      log_fps();
 
     }
 
     /// 打符
-    else if (mode.load() == io::Mode::small_buff || mode.load() == io::Mode::big_buff) {
+    else if (mode.load() == io::GimbalMode::SMALL_BUFF || mode.load() == io::GimbalMode::BIG_BUFF) {
       cv::Mat img;
       Eigen::Quaterniond q;
       std::chrono::steady_clock::time_point t;
 
       camera.read(img, t);
-      q = cboard.imu_at(t - 1ms);
+      q = gimbal.q(t);
+      auto gs = gimbal.state();
 
       // recorder.record(img, q, t);
 
@@ -117,22 +132,25 @@ int main(int argc, char * argv[])
       buff_solver.solve(power_runes);
 
       io::Command buff_command;
-      if (mode.load() == io::Mode::small_buff) {
+      if (mode.load() == io::GimbalMode::SMALL_BUFF) {
         buff_small_target.get_target(power_runes, t);
         auto target_copy = buff_small_target;
-        buff_command = buff_aimer.aim(target_copy, t, cboard.bullet_speed, true);
-      } else if (mode.load() == io::Mode::big_buff) {
+        buff_command = buff_aimer.aim(target_copy, t, gs.bullet_speed, true);
+      } else if (mode.load() == io::GimbalMode::BIG_BUFF) {
         buff_big_target.get_target(power_runes, t);
         auto target_copy = buff_big_target;
-        buff_command = buff_aimer.aim(target_copy, t, cboard.bullet_speed, true);
+        buff_command = buff_aimer.aim(target_copy, t, gs.bullet_speed, true);
       }
-      cboard.send(buff_command);
+      gimbal.send(
+        buff_command.control, buff_command.shoot, buff_command.yaw, 0, 0, buff_command.pitch, 0, 0);
+      log_fps();
 
     } else
       continue;
   }
 
   detect_thread.join();
+  gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
 
   return 0;
 }

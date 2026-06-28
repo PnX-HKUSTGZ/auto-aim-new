@@ -1,9 +1,9 @@
 #include "planner.hpp"
 
 #include <cmath>
-#include <limits>
 #include <vector>
 
+#include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/trajectory.hpp"
 #include "tools/yaml.hpp"
@@ -12,45 +12,15 @@ using namespace std::chrono_literals;
 
 namespace auto_aim
 {
-namespace
-{
-double shortest_angular_distance(double a, double b)
-{
-  return tools::limit_rad(a - b);
-}
-
-double armor_cost(const Target & target, const Eigen::Vector4d & xyza)
-{
-  const auto ekf_x = target.ekf_x();
-  const auto gun_to_center_angle = std::atan2(ekf_x[2], ekf_x[0]);
-  return std::abs(shortest_angular_distance(gun_to_center_angle, xyza[3]));
-}
-
-int selected_armor_id(const Target & target, const std::vector<Eigen::Vector4d> & armor_xyza_list)
-{
-  auto min_cost = std::numeric_limits<double>::max();
-  auto min_id = 0;
-
-  for (int i = 0; i < static_cast<int>(armor_xyza_list.size()); i++) {
-    auto cost = armor_cost(target, armor_xyza_list[i]);
-    if (cost < min_cost) {
-      min_cost = cost;
-      min_id = i;
-    }
-  }
-
-  return min_id;
-}
-}  // namespace
-
 Planner::Planner(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
   yaw_offset_ = tools::read<double>(yaml, "yaw_offset") / 57.3;
   pitch_offset_ = tools::read<double>(yaml, "pitch_offset") / 57.3;
+  comming_angle_ = tools::read<double>(yaml, "comming_angle") / 57.3;
+  leaving_angle_ = tools::read<double>(yaml, "leaving_angle") / 57.3;
   air_resistance_ = yaml["air_resistance"].as<double>();
   fire_thresh_ = tools::read<double>(yaml, "fire_thresh");
-  switch_dist_diff_thresh_ = tools::read<double>(yaml, "switch_dist_diff_thresh");
   decision_speed_ = tools::read<double>(yaml, "decision_speed");
   high_speed_delay_time_ = tools::read<double>(yaml, "high_speed_delay_time");
   low_speed_delay_time_ = tools::read<double>(yaml, "low_speed_delay_time");
@@ -67,8 +37,9 @@ Plan Planner::plan(Target target, double bullet_speed)
   }
 
   // 1. Predict fly_time
-  auto armor_xyza_list = target.armor_xyza_list();
-  auto xyza = armor_xyza_list[selected_armor_id(target, armor_xyza_list)];
+  auto aim_point = choose_aim_point(target);
+  if (!aim_point.valid) return {false};
+  auto xyza = aim_point.xyza;
   auto xyz = xyza.head<3>();
   auto aim_dist = xyza.head<2>().norm();
   auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z(), air_resistance_);
@@ -185,16 +156,10 @@ void Planner::setup_pitch_solver(const std::string & config_path)
 
 Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_speed)
 {
-  auto armor_xyza_list = target.armor_xyza_list();
-  auto min_id = selected_armor_id(target, armor_xyza_list);
+  auto aim_point = choose_aim_point(target);
+  if (!aim_point.valid) throw std::runtime_error("Invalid aim point!");
 
-  if (lock_id_ < 0 || lock_id_ >= static_cast<int>(armor_xyza_list.size())) lock_id_ = min_id;
-
-  auto locked_cost = armor_cost(target, armor_xyza_list[lock_id_]);
-  auto min_cost = armor_cost(target, armor_xyza_list[min_id]);
-  if (locked_cost - min_cost > switch_dist_diff_thresh_) lock_id_ = min_id;
-
-  auto xyza = armor_xyza_list[lock_id_];
+  auto xyza = aim_point.xyza;
   auto xyz = xyza.head<3>();
   auto yaw = xyza[3];
   auto aim_dist = xyza.head<2>().norm();
@@ -205,6 +170,64 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   if (bullet_traj.unsolvable) throw std::runtime_error("Unsolvable bullet trajectory!");
 
   return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};
+}
+
+PlannerAimPoint Planner::choose_aim_point(const Target & target)
+{
+  Eigen::VectorXd ekf_x = target.ekf_x();
+  std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
+  auto armor_num = armor_xyza_list.size();
+  if (!target.jumped) return {true, armor_xyza_list[0]};
+
+  auto center_yaw = std::atan2(ekf_x[2], ekf_x[0]);
+
+  std::vector<double> delta_angle_list;
+  for (int i = 0; i < static_cast<int>(armor_num); i++) {
+    auto delta_angle = tools::limit_rad(armor_xyza_list[i][3] - center_yaw);
+    delta_angle_list.emplace_back(delta_angle);
+  }
+
+  if (std::abs(target.ekf_x()[8]) <= 2 && target.name != ArmorName::outpost) {
+    std::vector<int> id_list;
+    for (int i = 0; i < static_cast<int>(armor_num); i++) {
+      if (std::abs(delta_angle_list[i]) > 60 / 57.3) continue;
+      id_list.push_back(i);
+    }
+
+    if (id_list.empty()) {
+      tools::logger()->warn("Empty id list!");
+      return {false, armor_xyza_list[0]};
+    }
+
+    if (id_list.size() > 1) {
+      int id0 = id_list[0], id1 = id_list[1];
+
+      if (lock_id_ != id0 && lock_id_ != id1)
+        lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
+
+      return {true, armor_xyza_list[lock_id_]};
+    }
+
+    lock_id_ = -1;
+    return {true, armor_xyza_list[id_list[0]]};
+  }
+
+  double coming_angle, leaving_angle;
+  if (target.name == ArmorName::outpost) {
+    coming_angle = 70 / 57.3;
+    leaving_angle = 30 / 57.3;
+  } else {
+    coming_angle = comming_angle_;
+    leaving_angle = leaving_angle_;
+  }
+
+  for (int i = 0; i < static_cast<int>(armor_num); i++) {
+    if (std::abs(delta_angle_list[i]) > coming_angle) continue;
+    if (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) return {true, armor_xyza_list[i]};
+    if (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle) return {true, armor_xyza_list[i]};
+  }
+
+  return {false, armor_xyza_list[0]};
 }
 
 Trajectory Planner::get_trajectory(Target & target, double yaw0, double bullet_speed)

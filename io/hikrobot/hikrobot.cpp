@@ -82,12 +82,20 @@ void HikRobot::capture_start()
     return;
   }
 
+  set_enum_value("AcquisitionMode", MV_ACQ_MODE_CONTINUOUS);
+  set_enum_value("TriggerMode", MV_TRIGGER_MODE_OFF);
   set_enum_value("BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_CONTINUOUS);
   set_enum_value("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);
   set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
   set_float_value("ExposureTime", exposure_us_);
   set_float_value("Gain", gain_);
-  MV_CC_SetFrameRate(handle_, 150);
+  set_bool_value("AcquisitionFrameRateEnable", true);
+  set_float_value("AcquisitionFrameRate", 150.0);
+  log_float_value("AcquisitionFrameRate");
+  log_float_value("ResultingFrameRate");
+  log_float_value("ExposureTime");
+  log_int_value("Width");
+  log_int_value("Height");
 
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
@@ -193,6 +201,16 @@ void HikRobot::set_float_value(const std::string & name, double value)
   }
 }
 
+void HikRobot::set_bool_value(const std::string & name, bool value)
+{
+  unsigned int ret = MV_CC_SetBoolValue(handle_, name.c_str(), value);
+
+  if (ret != MV_OK) {
+    tools::logger()->warn("MV_CC_SetBoolValue(\"{}\", {}) failed: {:#x}", name, value, ret);
+    return;
+  }
+}
+
 void HikRobot::set_enum_value(const std::string & name, unsigned int value)
 {
   unsigned int ret;
@@ -203,6 +221,36 @@ void HikRobot::set_enum_value(const std::string & name, unsigned int value)
     tools::logger()->warn("MV_CC_SetEnumValue(\"{}\", {}) failed: {:#x}", name, value, ret);
     return;
   }
+}
+
+void HikRobot::log_float_value(const std::string & name) const
+{
+  MVCC_FLOATVALUE value{};
+  auto ret = MV_CC_GetFloatValue(handle_, name.c_str(), &value);
+
+  if (ret != MV_OK) {
+    tools::logger()->warn("MV_CC_GetFloatValue(\"{}\") failed: {:#x}", name, ret);
+    return;
+  }
+
+  tools::logger()->info(
+    "[HikRobot] {} current={:.3f}, min={:.3f}, max={:.3f}", name, value.fCurValue,
+    value.fMin, value.fMax);
+}
+
+void HikRobot::log_int_value(const std::string & name) const
+{
+  MVCC_INTVALUE value{};
+  auto ret = MV_CC_GetIntValue(handle_, name.c_str(), &value);
+
+  if (ret != MV_OK) {
+    tools::logger()->warn("MV_CC_GetIntValue(\"{}\") failed: {:#x}", name, ret);
+    return;
+  }
+
+  tools::logger()->info(
+    "[HikRobot] {} current={}, min={}, max={}", name, value.nCurValue, value.nMin,
+    value.nMax);
 }
 
 void HikRobot::set_vid_pid(const std::string & vid_pid)

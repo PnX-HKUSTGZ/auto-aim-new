@@ -6,11 +6,15 @@ namespace auto_aim
 {
 namespace multithread
 {
-
 CommandGener::CommandGener(
-  auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::CBoard & cboard,
+  auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::Gimbal & gimbal,
   tools::Plotter & plotter, bool debug)
-: shooter_(shooter), aimer_(aimer), cboard_(cboard), plotter_(plotter), stop_(false), debug_(debug)
+: gimbal_(&gimbal),
+  shooter_(shooter),
+  aimer_(aimer),
+  plotter_(plotter),
+  stop_(false),
+  debug_(debug)
 {
   thread_ = std::thread(&CommandGener::generate_command, this);
 }
@@ -23,6 +27,7 @@ CommandGener::~CommandGener()
   }
   cv_.notify_all();
   if (thread_.joinable()) thread_.join();
+  if (gimbal_) gimbal_->send(false, false, 0, 0, 0, 0, 0, 0);
 }
 
 void CommandGener::push(
@@ -54,7 +59,8 @@ void CommandGener::generate_command()
                                    : std::sqrt(
                                        tools::square(input->targets_.front().ekf_x()[0]) +
                                        tools::square(input->targets_.front().ekf_x()[2]));
-      cboard_.send(command);
+      gimbal_->send(
+        command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
       if (debug_) {
         nlohmann::json data;
         data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);

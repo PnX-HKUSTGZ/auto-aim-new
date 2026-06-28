@@ -1,3 +1,5 @@
+#include <fmt/core.h>
+
 #include <chrono>
 #include <opencv2/opencv.hpp>
 #include <thread>
@@ -51,6 +53,7 @@ int main(int argc, char * argv[])
   });
 
   auto last_t = std::chrono::steady_clock::now();
+  auto last_reprojection_time = std::chrono::steady_clock::now();
   nlohmann::json data;
 
   while (!exiter.exit()) {
@@ -142,6 +145,10 @@ int main(int argc, char * argv[])
       data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
     }
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
+    auto now = std::chrono::steady_clock::now();
+    auto draw_dt = tools::delta_time(now, last_reprojection_time);
+    last_reprojection_time = now;
+    tools::draw_text(img, fmt::format("FPS: {:.1f}", 1.0 / draw_dt), {10, 60}, {255, 255, 255});
     cv::imshow("reprojection", img);
     auto key = cv::waitKey(1);
     if (key == 'q') break;

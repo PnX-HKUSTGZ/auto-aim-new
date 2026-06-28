@@ -16,6 +16,12 @@ constexpr int HORIZON = HALF_HORIZON * 2;
 
 using Trajectory = Eigen::Matrix<double, 4, HORIZON>;  // yaw, yaw_vel, pitch, pitch_vel
 
+struct PlannerAimPoint
+{
+  bool valid;
+  Eigen::Vector4d xyza;
+};
+
 struct Plan
 {
   bool control;
@@ -42,8 +48,9 @@ public:
 private:
   double yaw_offset_;
   double pitch_offset_;
+  double comming_angle_;
+  double leaving_angle_;
   double fire_thresh_;
-  double switch_dist_diff_thresh_;
   double low_speed_delay_time_, high_speed_delay_time_, decision_speed_;
   double air_resistance_ = 0.1;
   int lock_id_ = -1;
@@ -55,6 +62,7 @@ private:
   void setup_pitch_solver(const std::string & config_path);
 
   Eigen::Matrix<double, 2, 1> aim(const Target & target, double bullet_speed);
+  PlannerAimPoint choose_aim_point(const Target & target);
   Trajectory get_trajectory(Target & target, double yaw0, double bullet_speed);
 };
 
