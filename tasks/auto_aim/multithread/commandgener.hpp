@@ -1,13 +1,16 @@
 #ifndef AUTO_AIM_MULTITHREAD__HPP
 #define AUTO_AIM_MULTITHREAD__HPP
 
+#include <chrono>
+#include <condition_variable>
+#include <list>
+#include <mutex>
 #include <optional>
+#include <thread>
 
-#include "io/cboard.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "tasks/auto_aim/shooter.hpp"
-#include "tasks/auto_aim/tracker.hpp"
-#include "tasks/omniperception/decider.hpp"
+#include "tasks/auto_aim/planner/planner.hpp"
+#include "tasks/auto_aim/target.hpp"
 #include "tools/plotter.hpp"
 
 namespace auto_aim
@@ -19,32 +22,25 @@ class CommandGener
 {
 public:
   CommandGener(
-    auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::CBoard & cboard,
-    tools::Plotter & plotter, bool debug = false);
-
-  CommandGener(
-    auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::Gimbal & gimbal,
-    tools::Plotter & plotter, bool debug = false);
+    auto_aim::Planner & planner, io::Gimbal & gimbal, tools::Plotter & plotter,
+    bool debug = false);
 
   ~CommandGener();
 
   void push(
     const std::list<auto_aim::Target> & targets, const std::chrono::steady_clock::time_point & t,
-    double bullet_speed, const Eigen::Vector3d & gimbal_pos);
+    double bullet_speed);
 
 private:
   struct Input
   {
-    std::list<auto_aim::Target> targets_;
+    std::optional<auto_aim::Target> target;
     std::chrono::steady_clock::time_point t;
-    // std::function<void()> decide;
     double bullet_speed;
-    Eigen::Vector3d gimbal_pos;
   };
 
   io::Gimbal * gimbal_;
-  auto_aim::Shooter & shooter_;
-  auto_aim::Aimer & aimer_;
+  auto_aim::Planner & planner_;
   tools::Plotter & plotter_;
 
   std::optional<Input> latest_;

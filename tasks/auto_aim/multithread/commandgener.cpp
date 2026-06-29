@@ -7,11 +7,9 @@ namespace auto_aim
 namespace multithread
 {
 CommandGener::CommandGener(
-  auto_aim::Shooter & shooter, auto_aim::Aimer & aimer, io::Gimbal & gimbal,
-  tools::Plotter & plotter, bool debug)
+  auto_aim::Planner & planner, io::Gimbal & gimbal, tools::Plotter & plotter, bool debug)
 : gimbal_(&gimbal),
-  shooter_(shooter),
-  aimer_(aimer),
+  planner_(planner),
   plotter_(plotter),
   stop_(false),
   debug_(debug)
@@ -32,10 +30,10 @@ CommandGener::~CommandGener()
 
 void CommandGener::push(
   const std::list<auto_aim::Target> & targets, const std::chrono::steady_clock::time_point & t,
-  double bullet_speed, const Eigen::Vector3d & gimbal_pos)
+  double bullet_speed)
 {
   std::lock_guard<std::mutex> lock(mtx_);
-  latest_ = {targets, t, bullet_speed, gimbal_pos};
+  latest_ = {targets.empty() ? std::nullopt : std::make_optional(targets.front()), t, bullet_speed};
   cv_.notify_one();
 }
 
@@ -52,22 +50,29 @@ void CommandGener::generate_command()
         input = std::nullopt;
     }
     if (input) {
-      auto command = aimer_.aim(input->targets_, input->t, input->bullet_speed);
-      command.shoot = shooter_.shoot(command, aimer_, input->targets_, input->gimbal_pos);
-      command.horizon_distance = input->targets_.empty()
-                                   ? 0
-                                   : std::sqrt(
-                                       tools::square(input->targets_.front().ekf_x()[0]) +
-                                       tools::square(input->targets_.front().ekf_x()[2]));
+      auto plan = planner_.plan(input->target, input->bullet_speed);
+      auto horizon_distance = input->target.has_value()
+                                ? std::sqrt(
+                                    tools::square(input->target->ekf_x()[0]) +
+                                    tools::square(input->target->ekf_x()[2]))
+                                : 0;
+
       gimbal_->send(
-        command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
+        plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
+        plan.pitch_acc);
       if (debug_) {
         nlohmann::json data;
         data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);
-        data["cmd_yaw"] = command.yaw * 57.3;
-        data["cmd_pitch"] = command.pitch * 57.3;
-        data["shoot"] = command.shoot;
-        data["horizon_distance"] = command.horizon_distance;
+        data["target_yaw"] = plan.target_yaw;
+        data["target_pitch"] = plan.target_pitch;
+        data["plan_yaw"] = plan.yaw;
+        data["plan_yaw_vel"] = plan.yaw_vel;
+        data["plan_yaw_acc"] = plan.yaw_acc;
+        data["plan_pitch"] = plan.pitch;
+        data["plan_pitch_vel"] = plan.pitch_vel;
+        data["plan_pitch_acc"] = plan.pitch_acc;
+        data["fire"] = plan.fire ? 1 : 0;
+        data["horizon_distance"] = horizon_distance;
         plotter_.plot(data);
       }
     }

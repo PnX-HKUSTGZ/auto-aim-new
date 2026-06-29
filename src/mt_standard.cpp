@@ -4,10 +4,9 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
+#include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
-#include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_buff/buff_aimer.hpp"
@@ -46,8 +45,7 @@ int main(int argc, char * argv[])
   auto_aim::multithread::MultiThreadDetector detector(config_path);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
-  auto_aim::Aimer aimer(config_path);
-  auto_aim::Shooter shooter(config_path);
+  auto_aim::Planner planner(config_path);
 
   auto_buff::Buff_Detector buff_detector(config_path);
   auto_buff::Solver buff_solver(config_path);
@@ -55,7 +53,7 @@ int main(int argc, char * argv[])
   auto_buff::BigTarget buff_big_target;
   auto_buff::Aimer buff_aimer(config_path);
 
-  auto_aim::multithread::CommandGener commandgener(shooter, aimer, gimbal, plotter);
+  auto_aim::multithread::CommandGener commandgener(planner, gimbal, plotter);
 
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
@@ -104,11 +102,9 @@ int main(int argc, char * argv[])
 
       solver.set_R_gimbal2world(q);
 
-      Eigen::Vector3d ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
-
       auto targets = tracker.track(armors, t);
 
-      commandgener.push(targets, t, gs.bullet_speed, ypr);  // 发送给决策线程
+      commandgener.push(targets, t, gs.bullet_speed);  // 发送给决策线程
       log_fps();
 
     }

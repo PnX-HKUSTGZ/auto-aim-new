@@ -6,10 +6,9 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
-#include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
+#include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
-#include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
@@ -45,9 +44,8 @@ int main(int argc, char * argv[])
   auto_aim::multithread::MultiThreadDetector detector(config_path, true);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
-  auto_aim::Aimer aimer(config_path);
-  auto_aim::Shooter shooter(config_path);
-  auto_aim::multithread::CommandGener commandgener(shooter, aimer, gimbal, plotter, true);
+  auto_aim::Planner planner(config_path);
+  auto_aim::multithread::CommandGener commandgener(planner, gimbal, plotter, true);
 
   auto detect_thread = std::thread([&]() {
     cv::Mat img;
@@ -78,11 +76,9 @@ int main(int argc, char * argv[])
 
     solver.set_R_gimbal2world(q);
 
-    Eigen::Vector3d ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
-
     auto targets = tracker.track(armors, t);
 
-    commandgener.push(targets, t, gs.bullet_speed, ypr);  // 发送给决策线程
+    commandgener.push(targets, t, gs.bullet_speed);  // 发送给决策线程
 
     /// debug
     tools::draw_text(img, fmt::format("[{}]", tracker.state()), {10, 30}, {255, 255, 255});
@@ -119,15 +115,11 @@ int main(int argc, char * argv[])
         tools::draw_points(img, image_points, {0, 255, 0});
       }
 
-      // aimer瞄准位置
-      auto aim_point = aimer.debug_aim_point;
-      Eigen::Vector4d aim_xyza = aim_point.xyza;
+      // planner瞄准位置
+      Eigen::Vector4d aim_xyza = planner.debug_xyza;
       auto image_points =
         solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
-      if (aim_point.valid)
-        tools::draw_points(img, image_points, {0, 0, 255});
-      else
-        tools::draw_points(img, image_points, {255, 0, 0});
+      tools::draw_points(img, image_points, {0, 0, 255});
 
       // 观测器内部数据
       Eigen::VectorXd x = target.ekf_x();
@@ -157,8 +149,8 @@ int main(int argc, char * argv[])
     }
 
     // 云台响应情况
-    data["gimbal_yaw"] = ypr[0] * 57.3;
-    data["gimbal_pitch"] = ypr[1] * 57.3;
+    //data["gimbal_yaw"] = ypr[0] * 57.3;
+    //data["gimbal_pitch"] = ypr[1] * 57.3;
     data["bullet_speed"] = gs.bullet_speed;
 
     plotter.plot(data);
