@@ -5,7 +5,11 @@
 #include <Eigen/Geometry>
 #include <opencv2/core/eigen.hpp>
 
+#include <memory>
+
 #include "armor.hpp"
+#include "tools/math_tools.hpp"
+#include "ba_solver.hpp"  
 
 namespace auto_aim
 {
@@ -27,14 +31,21 @@ public:
 
   std::vector<cv::Point2f> world2pixel(const std::vector<cv::Point3f> & worldPoints);
 
+  Eigen::Vector3d rotationMatrixToRPY(const Eigen::Matrix3d &R) const;
+
+  Eigen::MatrixXd cvToEigen(const cv::Mat &cv_mat) const;
+
 private:
   cv::Mat camera_matrix_;
   cv::Mat distort_coeffs_;
   Eigen::Matrix3d R_gimbal2imubody_;
   Eigen::Matrix3d R_camera2gimbal_;
   Eigen::Vector3d t_camera2gimbal_;
+  Eigen::Matrix3d R_gimbal2camera_;
   Eigen::Matrix3d R_gimbal2world_;
+  std::unique_ptr<BaSolver> ba_solver_;
 
+  bool use_ba_optimization(const Armor & armor, double armor_roll) const;
   void optimize_yaw(Armor & armor) const;
 
   double armor_reprojection_error(const Armor & armor, double yaw, const double & inclined) const;
@@ -42,6 +53,7 @@ private:
     const std::vector<cv::Point2f> & cv_refs, const std::vector<cv::Point2f> & cv_pts,
     const double & inclined) const;
 };
+
 
 }  // namespace auto_aim
 

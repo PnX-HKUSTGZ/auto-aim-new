@@ -106,6 +106,19 @@ struct Armor
 
   double yaw_raw;  // rad
 
+  static constexpr std::size_t N_LANDMARKS = 4;
+
+  const std::vector<cv::Point2f> & landmarks() const { return points; }
+
+  template <typename T>
+  static std::vector<T> buildObjectPoints(double width, double height) {
+    return {
+        T(0, width / 2, height / 2),
+        T(0, -width / 2, height / 2),
+        T(0, -width / 2, -height / 2),
+        T(0, width / 2, -height / 2)};
+  }
+
   Armor(const Lightbar & left, const Lightbar & right);
   Armor(
     int class_id, float confidence, const cv::Rect & box, std::vector<cv::Point2f> armor_keypoints);
@@ -119,6 +132,13 @@ struct Armor
     int color_id, int num_id, float confidence, const cv::Rect & box,
     std::vector<cv::Point2f> armor_keypoints, cv::Point2f offset);
 };
+
+// Armor physical dimensions (meters)
+constexpr double SMALL_ARMOR_WIDTH  = 0.135;
+constexpr double SMALL_ARMOR_HEIGHT = 0.056;
+constexpr double LARGE_ARMOR_WIDTH  = 0.230;
+constexpr double LARGE_ARMOR_HEIGHT = 0.056;
+constexpr double FIFTEEN_DEGREE_RAD = 15.0 * M_PI / 180.0;
 
 }  // namespace auto_aim
 
