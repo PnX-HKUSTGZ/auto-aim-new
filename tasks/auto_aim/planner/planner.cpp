@@ -214,8 +214,8 @@ PlannerAimPoint Planner::choose_aim_point(const Target & target)
 
   double coming_angle, leaving_angle;
   if (target.name == ArmorName::outpost) {
-    coming_angle = 70 / 57.3;
-    leaving_angle = 30 / 57.3;
+    coming_angle = 90 / 57.3;
+    leaving_angle = 60 / 57.3;
   } else {
     coming_angle = comming_angle_;
     leaving_angle = leaving_angle_;

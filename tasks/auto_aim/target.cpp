@@ -31,12 +31,14 @@ Target::Target(
   auto center_y = xyz[1] + r * std::sin(ypr[0]);
   auto center_z = xyz[2];
 
-  // x vx y vy z vz a w r l h
+  // x vx y vy z1 vz a w r l h1 h2
   // a: angle
   // w: angular velocity
   // l: r2 - r1
-  // h: z2 - z1
-  Eigen::VectorXd x0{{center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, 0}};  //初始化预测量
+  // h1: z2 - z1
+  // h2: z3 - z1, only used by outpost
+  Eigen::VectorXd x0{
+    {center_x, 0, center_y, 0, center_z, 0, ypr[0], 0, r, 0, 0, 0}};  //初始化预测量
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值
@@ -49,10 +51,10 @@ Target::Target(
   ekf_ = tools::ExtendedKalmanFilter(x0, P0, x_add);  //初始化滤波器（预测量、预测量协方差）
 }
 
-Target::Target(double x, double vyaw, double radius, double h) : armor_num_(4)
+Target::Target(double x, double vyaw, double radius, double h1) : armor_num_(4)
 {
-  Eigen::VectorXd x0{{x, 0, 0, 0, 0, 0, 0, vyaw, radius, 0, h}};
-  Eigen::VectorXd P0_dig{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
+  Eigen::VectorXd x0{{x, 0, 0, 0, 0, 0, 0, vyaw, radius, 0, h1, 0}};
+  Eigen::VectorXd P0_dig{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
   Eigen::MatrixXd P0 = P0_dig.asDiagonal();
 
   // 防止夹角求和出现异常值
@@ -75,21 +77,11 @@ void Target::predict(std::chrono::steady_clock::time_point t)
 void Target::predict(double dt)
 {
   // 状态转移矩阵
-  // clang-format off
-  Eigen::MatrixXd F{
-    {1, dt,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    {0,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0},
-    {0,  0,  1, dt,  0,  0,  0,  0,  0,  0,  0},
-    {0,  0,  0,  1,  0,  0,  0,  0,  0,  0,  0},
-    {0,  0,  0,  0,  1, dt,  0,  0,  0,  0,  0},
-    {0,  0,  0,  0,  0,  1,  0,  0,  0,  0,  0},
-    {0,  0,  0,  0,  0,  0,  1, dt,  0,  0,  0},
-    {0,  0,  0,  0,  0,  0,  0,  1,  0,  0,  0},
-    {0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  0},
-    {0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  0},
-    {0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1}
-  };
-  // clang-format on
+  Eigen::MatrixXd F = Eigen::MatrixXd::Identity(12, 12);
+  F(0, 1) = dt;
+  F(2, 3) = dt;
+  F(4, 5) = dt;
+  F(6, 7) = dt;
 
   // Piecewise White Noise Model
   // https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/07-Kalman-Filter-Math.ipynb
@@ -104,22 +96,12 @@ void Target::predict(double dt)
   auto a = dt * dt * dt * dt / 4;
   auto b = dt * dt * dt / 2;
   auto c = dt * dt;
-  // 预测过程噪声偏差的方差
-  // clang-format off
-  Eigen::MatrixXd Q{
-    {a * v1, b * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {b * v1, c * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0, a * v1, b * v1,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0, b * v1, c * v1,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0, a * v1, b * v1,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0, b * v1, c * v1,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0, a * v2, b * v2, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0, b * v2, c * v2, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0},
-    {     0,      0,      0,      0,      0,      0,      0,      0, 0, 0, 0}
-  };
-  // clang-format on
+  // 预测过程噪声偏差的方差，r/l/h1/h2 按常量模型处理
+  Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(12, 12);
+  Q.block<2, 2>(0, 0) << a * v1, b * v1, b * v1, c * v1;
+  Q.block<2, 2>(2, 2) << a * v1, b * v1, b * v1, c * v1;
+  Q.block<2, 2>(4, 4) << a * v1, b * v1, b * v1, c * v1;
+  Q.block<2, 2>(6, 6) << a * v2, b * v2, b * v2, c * v2;
 
   // 防止夹角求和出现异常值
   auto f = [&](const Eigen::VectorXd & x) -> Eigen::VectorXd {
@@ -267,12 +249,22 @@ bool Target::convergened()
 Eigen::Vector3d Target::h_armor_xyz(const Eigen::VectorXd & x, int id) const
 {
   auto angle = tools::limit_rad(x[6] + id * 2 * CV_PI / armor_num_);
-  auto use_l_h = (armor_num_ == 4) && (id == 1 || id == 3);
+  auto use_l = (armor_num_ == 4) && (id == 1 || id == 3);
 
-  auto r = (use_l_h) ? x[8] + x[9] : x[8];
+  double dz_dh1 = 0.0;
+  double dz_dh2 = 0.0;
+  if (name == ArmorName::outpost) {
+    dz_dh1 = (id == 1) ? 1.0 : 0.0;
+    dz_dh2 = (id == 2) ? 1.0 : 0.0;
+  } else if (use_l) {
+    // 非前哨站保留原有的四装甲板交替高度模型，h2 固定为 0
+    dz_dh1 = 1.0;
+  }
+
+  auto r = (use_l) ? x[8] + x[9] : x[8];
   auto armor_x = x[0] - r * std::cos(angle);
   auto armor_y = x[2] - r * std::sin(angle);
-  auto armor_z = (use_l_h) ? x[4] + x[10] : x[4];
+  auto armor_z = x[4] + dz_dh1 * x[10] + dz_dh2 * x[11];
 
   return {armor_x, armor_y, armor_z};
 }
@@ -280,25 +272,32 @@ Eigen::Vector3d Target::h_armor_xyz(const Eigen::VectorXd & x, int id) const
 Eigen::MatrixXd Target::h_jacobian(const Eigen::VectorXd & x, int id) const
 {
   auto angle = tools::limit_rad(x[6] + id * 2 * CV_PI / armor_num_);
-  auto use_l_h = (armor_num_ == 4) && (id == 1 || id == 3);
+  auto use_l = (armor_num_ == 4) && (id == 1 || id == 3);
 
-  auto r = (use_l_h) ? x[8] + x[9] : x[8];
+  auto r = (use_l) ? x[8] + x[9] : x[8];
   auto dx_da = r * std::sin(angle);
   auto dy_da = -r * std::cos(angle);
 
   auto dx_dr = -std::cos(angle);
   auto dy_dr = -std::sin(angle);
-  auto dx_dl = (use_l_h) ? -std::cos(angle) : 0.0;
-  auto dy_dl = (use_l_h) ? -std::sin(angle) : 0.0;
+  auto dx_dl = (use_l) ? -std::cos(angle) : 0.0;
+  auto dy_dl = (use_l) ? -std::sin(angle) : 0.0;
 
-  auto dz_dh = (use_l_h) ? 1.0 : 0.0;
+  double dz_dh1 = 0.0;
+  double dz_dh2 = 0.0;
+  if (name == ArmorName::outpost) {
+    dz_dh1 = (id == 1) ? 1.0 : 0.0;
+    dz_dh2 = (id == 2) ? 1.0 : 0.0;
+  } else if (use_l) {
+    dz_dh1 = 1.0;
+  }
 
   // clang-format off
   Eigen::MatrixXd H_armor_xyza{
-    {1, 0, 0, 0, 0, 0, dx_da, 0, dx_dr, dx_dl,     0},
-    {0, 0, 1, 0, 0, 0, dy_da, 0, dy_dr, dy_dl,     0},
-    {0, 0, 0, 0, 1, 0,     0, 0,     0,     0, dz_dh},
-    {0, 0, 0, 0, 0, 0,     1, 0,     0,     0,     0}
+    {1, 0, 0, 0, 0, 0, dx_da, 0, dx_dr, dx_dl,      0,      0},
+    {0, 0, 1, 0, 0, 0, dy_da, 0, dy_dr, dy_dl,      0,      0},
+    {0, 0, 0, 0, 1, 0,     0, 0,     0,     0, dz_dh1, dz_dh2},
+    {0, 0, 0, 0, 0, 0,     1, 0,     0,     0,      0,      0}
   };
   // clang-format on
 
