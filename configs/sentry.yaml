@@ -28,14 +28,14 @@ fov_h: 57.7 #87.7
 fov_v: 56.7 
 new_fov_h: 27 #67
 new_fov_v: 40.9
-usb_frame_rate: 120
+usb_frame_rate: 60
 usb_exposure: 500 #1-80000______250
 usb_gamma: 160
 usb_gain: 10 #0-96
 
 #####-----工业相机参数-----#####
 camera_name: "hikrobot"
-exposure_ms: 0.8
+exposure_ms: 3
 gain: 16.9
 vid_pid: "2bdf:0001"
 
@@ -51,11 +51,18 @@ max_side_ratio: 1.5
 max_rectangular_error: 25 # degree
 min_confidence: 0.8
 
-#####-----cboard参数-----#####
-quaternion_canid: 0x01
-bullet_speed_canid: 0x110
-send_canid: 0xff
-can_interface: "can0"
+# #####-----cboard参数-----#####
+# quaternion_canid: 0x01
+# bullet_speed_canid: 0x110
+# send_canid: 0xff
+# can_interface: "can0"
+
+#####-----gimbal参数-----#####
+com_port: "/dev/ttyACM0"
+yaw_kp: 0
+yaw_kd: 0
+pitch_kp: 0
+pitch_kd: 0
 
 #####-----tracker参数-----#####
 min_detect_count: 5

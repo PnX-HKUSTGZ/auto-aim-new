@@ -26,7 +26,7 @@ Decider::Decider(const std::string & config_path) : detector_(config_path), coun
 
 io::Command Decider::decide(
   auto_aim::YOLO & yolo, const Eigen::Vector3d & gimbal_pos, io::USBCamera & usbcam1,
-  io::USBCamera & usbcam2, io::Camera & back_camera)
+  io::USBCamera & usbcam2, io::USBCamera & back_camera)
 {
   Eigen::Vector2d delta_angle;
   io::USBCamera * cams[] = {&usbcam1, &usbcam2};

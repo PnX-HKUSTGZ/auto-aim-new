@@ -20,7 +20,7 @@ class Perceptron
 public:
   Perceptron(
     io::USBCamera * usbcma1, io::USBCamera * usbcam2, io::USBCamera * usbcam3,
-    io::USBCamera * usbcam4, const std::string & config_path);
+    const std::string & config_path);
 
   ~Perceptron();
 
@@ -35,7 +35,6 @@ private:
   std::shared_ptr<auto_aim::YOLO> yolo_parallel1_;
   std::shared_ptr<auto_aim::YOLO> yolo_parallel2_;
   std::shared_ptr<auto_aim::YOLO> yolo_parallel3_;
-  std::shared_ptr<auto_aim::YOLO> yolo_parallel4_;
 
   Decider decider_;
   bool stop_flag_;

@@ -1,14 +1,28 @@
 #ifndef IO__ROS2_HPP
 #define IO__ROS2_HPP
 
+#ifdef SP_VISION_WITH_ROS2
+
 #include "publish2nav.hpp"
 #include "subscribe2nav.hpp"
+
+#else
+
+#include <Eigen/Dense>
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#endif
 
 namespace io
 {
 class ROS2
 {
 public:
+#ifdef SP_VISION_WITH_ROS2
   ROS2();
 
   ~ROS2();
@@ -39,6 +53,18 @@ private:
 
   std::unique_ptr<std::thread> publish_spin_thread_;
   std::unique_ptr<std::thread> subscribe_spin_thread_;
+#else
+public:
+  ROS2() = default;
+
+  ~ROS2() = default;
+
+  void publish(const Eigen::Vector4d &) {}
+
+  std::vector<int8_t> subscribe_enemy_status() { return {}; }
+
+  std::vector<int8_t> subscribe_autoaim_target() { return {}; }
+#endif
 };
 
 }  // namespace io

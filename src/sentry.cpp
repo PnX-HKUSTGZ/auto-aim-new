@@ -7,7 +7,7 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
-#include "io/ros2/publish2nav.hpp"
+// #include "io/ros2/publish2nav.hpp"
 #include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
@@ -43,11 +43,11 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>(0);
 
   io::ROS2 ros2;
-  io::CBoard cboard(config_path);
+  io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
-  io::Camera back_camera("configs/camera.yaml");
-  io::USBCamera usbcam1("video0", config_path);
-  io::USBCamera usbcam2("video2", config_path);
+  io::USBCamera usbcam1("/dev/usbcam_left", config_path);
+  io::USBCamera usbcam2("/dev/usbcam_right", config_path);
+  io::USBCamera back_camera("/dev/usbcam_back", config_path);
 
   auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
@@ -61,10 +61,22 @@ int main(int argc, char * argv[])
 
   std::chrono::steady_clock::time_point timestamp;
   io::Command last_command;
+  int frame_count = 0;
+  auto last_fps_time = steady_clock::now();
 
   while (!exiter.exit()) {
     camera.read(img, timestamp);
-    Eigen::Quaterniond q = cboard.imu_at(timestamp - 1ms);
+    frame_count++;
+    auto now = steady_clock::now();
+    auto elapsed = duration_cast<milliseconds>(now - last_fps_time).count();
+    if (elapsed >= 1000) {
+      tools::logger()->info("[sentry] {:.2f} fps", frame_count * 1000.0 / elapsed);
+      frame_count = 0;
+      last_fps_time = now;
+    }
+
+    Eigen::Quaterniond q = gimbal.q(timestamp);
+    auto gs = gimbal.state();
     // recorder.record(img, q, timestamp);
 
     /// 自瞄核心逻辑
@@ -90,12 +102,12 @@ int main(int argc, char * argv[])
     if (tracker.state() == "lost")
       command = decider.decide(yolo, gimbal_pos, usbcam1, usbcam2, back_camera);
     else
-      command = aimer.aim(targets, timestamp, cboard.bullet_speed, cboard.shoot_mode);
+      command = aimer.aim(targets, timestamp, gs.bullet_speed);
 
     /// 发射逻辑
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 
-    cboard.send(command);
+    gimbal.send(command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0); //如果电控用速度的话要改，不只是0，0
 
     /// ROS2通信
     Eigen::Vector4d target_info = decider.get_target_info(armors, targets);

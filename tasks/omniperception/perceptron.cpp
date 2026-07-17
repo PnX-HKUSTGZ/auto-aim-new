@@ -12,21 +12,19 @@ namespace omniperception
 {
 Perceptron::Perceptron(
   io::USBCamera * usbcam1, io::USBCamera * usbcam2, io::USBCamera * usbcam3,
-  io::USBCamera * usbcam4, const std::string & config_path)
+  const std::string & config_path)
 : detection_queue_(10), decider_(config_path), stop_flag_(false)
 {
   // 初始化 YOLO 模型
   yolo_parallel1_ = std::make_shared<auto_aim::YOLO>(config_path, false);
   yolo_parallel2_ = std::make_shared<auto_aim::YOLO>(config_path, false);
   yolo_parallel3_ = std::make_shared<auto_aim::YOLO>(config_path, false);
-  yolo_parallel4_ = std::make_shared<auto_aim::YOLO>(config_path, false);
 
   std::this_thread::sleep_for(std::chrono::seconds(2));
-  // 创建四个线程进行并行推理
+  // 创建三个线程进行并行推理
   threads_.emplace_back([&] { parallel_infer(usbcam1, yolo_parallel1_); });
   threads_.emplace_back([&] { parallel_infer(usbcam2, yolo_parallel2_); });
   threads_.emplace_back([&] { parallel_infer(usbcam3, yolo_parallel3_); });
-  threads_.emplace_back([&] { parallel_infer(usbcam4, yolo_parallel4_); });
 
   tools::logger()->info("Perceptron initialized.");
 }

@@ -108,21 +108,24 @@ find_package(rclcpp QUIET)
 find_package(std_msgs QUIET)
 find_package(rosidl_typesupport_cpp QUIET)
 find_package(sp_msgs QUIET)
-# 只有在找到 ROS 环境时才会添加 sentry 和 publish_test
+
+function(add_sentry_executable target source)
+    add_executable(${target} ${source})
+    target_link_libraries(${target} ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
+endfunction()
+
+add_sentry_executable(sentry src/sentry.cpp)
+add_sentry_executable(sentry_bp src/sentry_bp.cpp)
+add_sentry_executable(sentry_debug src/sentry_debug.cpp)
+add_sentry_executable(sentry_multithread src/sentry_multithread.cpp)
+
+# 只有在找到 ROS 环境时才会添加 ROS2 测试目标
 if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND rosidl_typesupport_cpp_FOUND AND sp_msgs_FOUND)
-    # 编译 sentry 和 publish_test
-    add_executable(sentry src/sentry.cpp)
-    add_executable(sentry_bp src/sentry_bp.cpp)
-    add_executable(sentry_debug src/sentry_debug.cpp)
-    add_executable(sentry_multithread src/sentry_multithread.cpp)
+    # 编译 ROS2 测试目标
     add_executable(publish_test tests/publish_test.cpp)
     add_executable(subscribe_test tests/subscribe_test.cpp)
     add_executable(topic_loop_test tests/topic_loop_test.cpp)
 
-    target_link_libraries(sentry ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(sentry_bp ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(sentry_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(sentry_multithread ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
     target_link_libraries(publish_test ${OpenCV_LIBS} fmt::fmt tools io auto_aim)
     target_link_libraries(subscribe_test ${OpenCV_LIBS} fmt::fmt tools io)
     target_link_libraries(topic_loop_test ${OpenCV_LIBS} fmt::fmt tools io)

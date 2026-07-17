@@ -52,6 +52,7 @@ else()
     
     # 添加 ROS2 相关的文件
     target_sources(io PRIVATE ros2/publish2nav.cpp ros2/ros2.cpp ros2/subscribe2nav.cpp)
+    target_compile_definitions(io PUBLIC SP_VISION_WITH_ROS2)
 
     # 设置 ROS2 依赖
     include_directories(${std_msgs_INCLUDE_DIRS})

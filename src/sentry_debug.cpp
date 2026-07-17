@@ -6,8 +6,8 @@
 #include <thread>
 
 #include "io/camera.hpp"
-#include "io/gimbal.hpp"
-#include "io/ros2/publish2nav.hpp"
+#include "io/gimbal/gimbal.hpp"
+// #include "io/ros2/publish2nav.hpp"
 #include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
@@ -45,9 +45,9 @@ int main(int argc, char * argv[])
   io::ROS2 ros2;
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
-  io::Camera back_camera("configs/camera.yaml");
-  io::USBCamera usbcam1("video0", config_path);
-  io::USBCamera usbcam2("video2", config_path);
+  io::USBCamera usbcam1("/dev/usbcam_left", config_path);
+  io::USBCamera usbcam2("/dev/usbcam_right", config_path);
+  io::USBCamera back_camera("/dev/usbcam_back", config_path);
 
   auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
@@ -65,7 +65,7 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, timestamp);
-    Eigen::Quaterniond q = gimbal.imu_at(timestamp - 1ms);
+    Eigen::Quaterniond q = gimbal.imu_at(timestamp - std::chrono::milliseconds(1));
     // recorder.record(img, q, timestamp);
 
     /// 自瞄核心逻辑
@@ -91,12 +91,12 @@ int main(int argc, char * argv[])
     if (tracker.state() == "lost")
       command = decider.decide(yolo, gimbal_pos, usbcam1, usbcam2, back_camera);
     else
-      command = aimer.aim(targets, timestamp, gimbal.bullet_speed, gimbal.mode);
+      command = aimer.aim(targets, timestamp, gs.bullet_speed);
 
     /// 发射逻辑
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 
-    gimbal.send(command);
+    gimbal.send(command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
 
     /// ROS2通信
     Eigen::Vector4d target_info = decider.get_target_info(armors, targets);
@@ -178,14 +178,14 @@ int main(int argc, char * argv[])
     // 云台响应情况
     data["gimbal_yaw"] = gimbal_pos[0] * 57.3;
     data["gimbal_pitch"] = -gimbal_pos[1] * 57.3;
-    data["shootmode"] = gimbal.mode;
+    data["shootmode"] = static_cast<int>(gimbal.mode());
     if (command.control) {
       data["cmd_yaw"] = command.yaw * 57.3;
       data["cmd_pitch"] = command.pitch * 57.3;
       data["cmd_shoot"] = command.shoot;
     }
 
-    data["bullet_speed"] = gimbal.bullet_speed;
+    data["bullet_speed"] = gs.bullet_speed;
 
     plotter.plot(data);
 

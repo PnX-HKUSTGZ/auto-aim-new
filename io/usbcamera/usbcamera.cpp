@@ -1,5 +1,6 @@
 #include "usbcamera.hpp"
 
+#include <filesystem>
 #include <stdexcept>
 
 #include "tools/logger.hpp"
@@ -93,10 +94,17 @@ void USBCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point & time
 void USBCamera::open()
 {
   std::lock_guard<std::mutex> lock(cap_mutex_);
-  std::string true_device_name = "/dev/" + open_name_;
+  std::string true_device_name = open_name_;
+  if (true_device_name.rfind("/dev/", 0) != 0) {
+    true_device_name = "/dev/" + true_device_name;
+  }
+  if (std::filesystem::exists(true_device_name)) {
+    true_device_name = std::filesystem::canonical(true_device_name).string();
+  }
+  tools::logger()->info("Opening USB camera: {}", true_device_name);
   cap_.open(true_device_name, cv::CAP_V4L);
   if (!cap_.isOpened()) {
-    tools::logger()->warn("Failed to open USB camera");
+    tools::logger()->warn("Failed to open USB camera: {}", true_device_name);
     return;
   }
   sharpness_ = cap_.get(cv::CAP_PROP_SHARPNESS);
@@ -116,6 +124,8 @@ void USBCamera::open()
     cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
     cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
     cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
+  } else {
+    device_name = true_device_name;
   }
 
   tools::logger()->info("{} USBCamera opened", device_name);
