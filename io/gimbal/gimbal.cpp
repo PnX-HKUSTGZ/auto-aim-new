@@ -167,6 +167,7 @@ void Gimbal::read_thread()
 
     error_count = 0;
     Eigen::Quaterniond q(rx_data_.q[0], rx_data_.q[1], rx_data_.q[2], rx_data_.q[3]);
+    //Eigen::Quaterniond q(1, 0, 0, 0);
     queue_.push({q, t});
 
     std::lock_guard<std::mutex> lock(mutex_);

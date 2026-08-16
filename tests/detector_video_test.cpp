@@ -1,8 +1,10 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <optional>
 #include <opencv2/opencv.hpp>
 
+#include "io/camera.hpp"
 #include "tasks/auto_aim/detector.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
@@ -14,8 +16,7 @@ const std::string keys =
   "{config-path c  | configs/sentry.yaml    | yaml配置文件的路径}"
   "{start-index s  | 0                      | 视频起始帧下标    }"
   "{end-index e    | 0                      | 视频结束帧下标    }"
-  "{@video_path    |                        | avi路径}"
-  "{tradition t    |  false                 | 是否使用传统方法识别}";
+  "{@video_path    |                        | avi路径}";
 
 int main(int argc, char * argv[])
 {
@@ -29,24 +30,35 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>("config-path");
   auto start_index = cli.get<int>("start-index");
   auto end_index = cli.get<int>("end-index");
-  auto use_tradition = cli.get<bool>("tradition");
+  bool use_tradition = false;
+  bool use_camera = true;
 
   tools::Exiter exiter;
   tools::Plotter plotter;
 
-  cv::VideoCapture video(video_path);
+  std::optional<io::Camera> camera;
+  cv::VideoCapture video;
+  if (use_camera) {
+    camera.emplace(config_path);
+  } else {
+    video.open(video_path);
+    video.set(cv::CAP_PROP_POS_FRAMES, start_index);
+  }
 
   auto_aim::Detector detector(config_path);
   auto_aim::YOLO yolo(config_path);
-
-  video.set(cv::CAP_PROP_POS_FRAMES, start_index);
 
   for (int frame_count = start_index; !exiter.exit(); frame_count++) {
     if (end_index > 0 && frame_count > end_index) break;
 
     cv::Mat img;
+    std::chrono::steady_clock::time_point t;
     std::list<auto_aim::Armor> armors;
-    video.read(img);
+    if (use_camera)
+      camera->read(img, t);
+    else
+      video.read(img);
+
     if (img.empty()) break;
     // cv::GaussianBlur(img, img, cv::Size(5, 5), 0, 0, cv::BORDER_DEFAULT);
 

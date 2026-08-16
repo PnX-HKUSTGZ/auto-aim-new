@@ -34,6 +34,9 @@ private:
   Eigen::Matrix3d R_camera2gimbal_;
   Eigen::Vector3d t_camera2gimbal_;
   Eigen::Matrix3d R_gimbal2world_;
+  bool use_pnp_yaw_range_ = false;
+  double pnp_yaw_min_ = -CV_PI;
+  double pnp_yaw_max_ = CV_PI;
 
   void optimize_yaw(Armor & armor) const;
 

@@ -1,5 +1,6 @@
 #include "solver.hpp"
 
+#include <algorithm>
 #include <yaml-cpp/yaml.h>
 
 #include <vector>
@@ -41,6 +42,18 @@ Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3
   Eigen::Matrix<double, 1, 5> distort_coeffs(distort_coeffs_data.data());
   cv::eigen2cv(camera_matrix, camera_matrix_);
   cv::eigen2cv(distort_coeffs, distort_coeffs_);
+
+  if (yaml["pnp_yaw_range"]) {
+    auto pnp_yaw_range_data = yaml["pnp_yaw_range"].as<std::vector<double>>();
+    if (pnp_yaw_range_data.size() == 2) {
+      pnp_yaw_min_ = pnp_yaw_range_data[0] * CV_PI / 180.0;
+      pnp_yaw_max_ = pnp_yaw_range_data[1] * CV_PI / 180.0;
+      if (pnp_yaw_min_ > pnp_yaw_max_) std::swap(pnp_yaw_min_, pnp_yaw_max_);
+      use_pnp_yaw_range_ = true;
+    } else {
+      tools::logger()->warn("[Solver] pnp_yaw_range must contain exactly 2 values");
+    }
+  }
 }
 
 Eigen::Matrix3d Solver::R_gimbal2world() const { return R_gimbal2world_; }
@@ -77,6 +90,12 @@ void Solver::solve(Armor & armor) const
   armor.ypr_in_world = tools::eulers(R_armor2world, 2, 1, 0);
 
   armor.ypd_in_world = tools::xyz2ypd(armor.xyz_in_world);
+
+  armor.yaw_raw = armor.ypr_in_world[0];
+  if (use_pnp_yaw_range_ && (armor.yaw_raw < pnp_yaw_min_ || armor.yaw_raw > pnp_yaw_max_)) {
+    armor.name = ArmorName::not_armor;
+    return;
+  }
 
   // 平衡不做yaw优化，因为pitch假设不成立
   auto is_balance = (armor.type == ArmorType::big) &&
@@ -213,7 +232,6 @@ void Solver::optimize_yaw(Armor & armor) const
     }
   }
 
-  armor.yaw_raw = armor.ypr_in_world[0];
   armor.ypr_in_world[0] = best_yaw;
 }
 

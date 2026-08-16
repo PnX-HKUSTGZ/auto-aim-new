@@ -65,7 +65,8 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, timestamp);
-    Eigen::Quaterniond q = gimbal.imu_at(timestamp - std::chrono::milliseconds(1));
+    Eigen::Quaterniond q = gimbal.q(timestamp - std::chrono::milliseconds(1));
+    auto gs = gimbal.state();
     // recorder.record(img, q, timestamp);
 
     /// 自瞄核心逻辑

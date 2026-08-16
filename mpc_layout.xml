@@ -60,6 +60,20 @@
     </DockSplitter>
    </Container>
   </Tab>
+  <Tab tab_name="aim_id" containers="1">
+   <Container>
+    <DockSplitter sizes="1" count="1" orientation="-">
+     <DockArea name="...">
+      <plot flip_y="false" mode="TimeSeries" flip_x="false" style="Lines">
+       <range left="0.000000" right="10.000000" bottom="-1.500000" top="4.500000"/>
+       <limitY/>
+       <curve color="#d62728" name="/lock_id"/>
+       <curve color="#1f77b4" name="/aim_point_id"/>
+      </plot>
+     </DockArea>
+    </DockSplitter>
+   </Container>
+  </Tab>
   <currentTabIndex index="0"/>
  </tabbed_widget>
  <use_relative_time_offset enabled="1"/>
@@ -108,4 +122,3 @@
  <snippets/>
  <!-- - - - - - - - - - - - - - - -->
 </root>
-

@@ -38,6 +38,7 @@ Plan Planner::plan(Target target, double bullet_speed)
 
   // 1. Predict fly_time
   auto aim_point = choose_aim_point(target);
+  debug_aim_point_id_ = aim_point.id;
   if (!aim_point.valid) return {false};
   auto xyza = aim_point.xyza;
   auto xyz = xyza.head<3>();
@@ -75,6 +76,7 @@ Plan Planner::plan(Target target, double bullet_speed)
   plan.control = true;
 
   plan.target_yaw = tools::limit_rad(traj(0, HALF_HORIZON) + yaw0);
+  plan.target_yaw_vel = traj(1, HALF_HORIZON);
   plan.target_pitch = traj(2, HALF_HORIZON);
 
   plan.yaw = tools::limit_rad(yaw_solver_->work->x(0, HALF_HORIZON) + yaw0);
@@ -164,6 +166,7 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   auto yaw = xyza[3];
   auto aim_dist = xyza.head<2>().norm();
   debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
+  debug_aim_point_id_ = aim_point.id;
 
   auto azim = std::atan2(xyz.y(), xyz.x());
   auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z(), air_resistance_);
@@ -177,7 +180,7 @@ PlannerAimPoint Planner::choose_aim_point(const Target & target)
   Eigen::VectorXd ekf_x = target.ekf_x();
   std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
   auto armor_num = armor_xyza_list.size();
-  if (!target.jumped) return {true, armor_xyza_list[0]};
+  if (!target.jumped) return {true, 0, armor_xyza_list[0]};
 
   auto center_yaw = std::atan2(ekf_x[2], ekf_x[0]);
 
@@ -187,7 +190,7 @@ PlannerAimPoint Planner::choose_aim_point(const Target & target)
     delta_angle_list.emplace_back(delta_angle);
   }
 
-  if (std::abs(target.ekf_x()[8]) <= 2 && target.name != ArmorName::outpost) {
+  if (std::abs(target.ekf_x()[7]) <= 1 && target.name != ArmorName::outpost) {
     std::vector<int> id_list;
     for (int i = 0; i < static_cast<int>(armor_num); i++) {
       if (std::abs(delta_angle_list[i]) > 60 / 57.3) continue;
@@ -196,7 +199,7 @@ PlannerAimPoint Planner::choose_aim_point(const Target & target)
 
     if (id_list.empty()) {
       tools::logger()->warn("Empty id list!");
-      return {false, armor_xyza_list[0]};
+      return {false, -1, armor_xyza_list[0]};
     }
 
     if (id_list.size() > 1) {
@@ -204,12 +207,33 @@ PlannerAimPoint Planner::choose_aim_point(const Target & target)
 
       if (lock_id_ != id0 && lock_id_ != id1)
         lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
-
-      return {true, armor_xyza_list[lock_id_]};
+      return {true, lock_id_, armor_xyza_list[lock_id_]};
     }
 
     lock_id_ = -1;
-    return {true, armor_xyza_list[id_list[0]]};
+    return {true, id_list[0], armor_xyza_list[id_list[0]]};
+  }else if (abs(target.ekf_x()[7]) >= 1 && target.name != ArmorName::outpost) {
+    std::vector<int> id_list;
+    for (int i = 0; i < static_cast<int>(armor_num); i++) {
+      if (std::abs(delta_angle_list[i]) > 60 / 57.3) continue;
+      id_list.push_back(i);
+    }
+
+    if (id_list.empty()) {
+      tools::logger()->warn("Empty id list!");
+      return {false, -1, armor_xyza_list[0]};
+    }
+
+    if (id_list.size() > 1) {
+      int id0 = id_list[0], id1 = id_list[1];
+
+      // if (lock_id_ != id0 && lock_id_ != id1)
+        lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
+      return {true, lock_id_, armor_xyza_list[lock_id_]};
+    }
+
+    // lock_id_ = -1;
+    return {true, id_list[0], armor_xyza_list[id_list[0]]};
   }
 
   double coming_angle, leaving_angle;
@@ -223,11 +247,11 @@ PlannerAimPoint Planner::choose_aim_point(const Target & target)
 
   for (int i = 0; i < static_cast<int>(armor_num); i++) {
     if (std::abs(delta_angle_list[i]) > coming_angle) continue;
-    if (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) return {true, armor_xyza_list[i]};
-    if (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle) return {true, armor_xyza_list[i]};
+    if (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) return {true, i, armor_xyza_list[i]};
+    if (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle) return {true, i, armor_xyza_list[i]};
   }
 
-  return {false, armor_xyza_list[0]};
+  return {false, -1, armor_xyza_list[0]};
 }
 
 Trajectory Planner::get_trajectory(Target & target, double yaw0, double bullet_speed)
