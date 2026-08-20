@@ -15,6 +15,11 @@ find_package(nlohmann_json REQUIRED)
 set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/")
 find_package(OpenVINO REQUIRED)
 
+# Third-party libraries (g2o, Sophus) installed at custom prefix
+list(APPEND CMAKE_PREFIX_PATH "/home/pnx/rmvision/pnx_autoaim/third_party_install")
+find_package(g2o REQUIRED)
+find_package(Sophus REQUIRED)
+
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR})

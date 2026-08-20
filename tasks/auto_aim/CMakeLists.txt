@@ -11,6 +11,7 @@ add_library(auto_aim OBJECT
     classifier.cpp 
     detector.cpp
     solver.cpp
+    ba_solver.cpp
     aimer.cpp
     target.cpp
     tracker.cpp
@@ -25,4 +26,5 @@ add_library(auto_aim OBJECT
     planner/planner.cpp
 )
 
-target_link_libraries(auto_aim io openvino::runtime tinympcstatic)
+target_link_libraries(auto_aim io openvino::runtime tinympcstatic
+    g2o::core g2o::types_slam3d g2o::solver_dense Sophus::Sophus)

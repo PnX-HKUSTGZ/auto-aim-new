@@ -48,7 +48,6 @@ YOLOV5::YOLOV5(const std::string & config_path, bool debug)
     .convert_color(ov::preprocess::ColorFormat::RGB)
     .scale(255.0);
 
-  // TODO: ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
   model = ppp.build();
   compiled_model_ = core_.compile_model(
     model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
@@ -106,8 +105,8 @@ std::list<Armor> YOLOV5::parse(
   std::vector<int> color_ids, num_ids;
   std::vector<float> confidences;
   std::vector<cv::Rect> boxes;
-  std::vector<std::vector<cv::Point2f>> armors_key_points;
-  for (int r = 0; r < output.rows; r++) {
+  std::vector<std::vector<cv::Point2f>> armors_key_points; //存储装甲板四个角点的像素坐标
+  for (int r = 0; r < output.rows; r++) { // 遍历候选检测，取出每个候选检测的置信度，颜色，类别，四个角点坐标
     double score = output.at<float>(r, 8);
     score = sigmoid(score);
 
@@ -116,17 +115,19 @@ std::list<Armor> YOLOV5::parse(
     std::vector<cv::Point2f> armor_key_points;
 
     //颜色和类别独热向量
+    // [ kp0  kp1  kp2  kp3 | score | color(4) |  class(9)  ]
+    //   0 1  2 3  4 5  6 7    8     9 10 11 12  13 ... 21
     cv::Mat color_scores = output.row(r).colRange(9, 13);     //color
     cv::Mat classes_scores = output.row(r).colRange(13, 22);  //num
     cv::Point class_id, color_id;
     int _class_id, _color_id;
     double score_color, score_num;
-    cv::minMaxLoc(classes_scores, NULL, &score_num, NULL, &class_id);
-    cv::minMaxLoc(color_scores, NULL, &score_color, NULL, &color_id);
+    cv::minMaxLoc(classes_scores, NULL, &score_num, NULL, &class_id); // 获取装甲板编号
+    cv::minMaxLoc(color_scores, NULL, &score_color, NULL, &color_id); // 获取装甲板颜色
     _class_id = class_id.x;
     _color_id = color_id.x;
 
-    armor_key_points.push_back(
+    armor_key_points.push_back( // 得到装甲板四个角点的像素坐标（yolo给出的）
       cv::Point2f(output.at<float>(r, 0) / scale, output.at<float>(r, 1) / scale));
     armor_key_points.push_back(
       cv::Point2f(output.at<float>(r, 6) / scale, output.at<float>(r, 7) / scale));
@@ -157,7 +158,7 @@ std::list<Armor> YOLOV5::parse(
   }
 
   std::vector<int> indices;
-  cv::dnn::NMSBoxes(boxes, confidences, score_threshold_, nms_threshold_, indices);
+  cv::dnn::NMSBoxes(boxes, confidences, score_threshold_, nms_threshold_, indices); // 去重
 
   std::list<Armor> armors;
   for (const auto & i : indices) {
