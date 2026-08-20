@@ -121,6 +121,8 @@ std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
 
 bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)//被/auto_aim/yolos/yolo*.cpp调用，修改armor的角点
 {
+  armor.traditional_points.clear();
+
   // 取得四个角点
   auto tl = armor.points[0];
   auto tr = armor.points[1];
@@ -220,10 +222,11 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)//被/auto_aim/yolo
     closest_left_lightbar && closest_right_lightbar &&
     min_distance_br_tr + min_distance_tl_bl < 15) {
     // 将四个点从armor_roi坐标系转换到原始图像坐标系
-    armor.points[0] = closest_left_lightbar->top + cv::Point2f(boundingBox.x, boundingBox.y);
-    armor.points[1] = closest_right_lightbar->top + cv::Point2f(boundingBox.x, boundingBox.y);
-    armor.points[2] = closest_right_lightbar->bottom + cv::Point2f(boundingBox.x, boundingBox.y);
-    armor.points[3] = closest_left_lightbar->bottom + cv::Point2f(boundingBox.x, boundingBox.y);
+    armor.traditional_points = {
+      closest_left_lightbar->top + cv::Point2f(boundingBox.x, boundingBox.y),
+      closest_right_lightbar->top + cv::Point2f(boundingBox.x, boundingBox.y),
+      closest_right_lightbar->bottom + cv::Point2f(boundingBox.x, boundingBox.y),
+      closest_left_lightbar->bottom + cv::Point2f(boundingBox.x, boundingBox.y)};
     return true;
   }
 

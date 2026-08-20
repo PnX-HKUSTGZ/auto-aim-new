@@ -1,6 +1,7 @@
 #include "solver.hpp"
 
 #include <algorithm>
+#include <map>
 #include <yaml-cpp/yaml.h>
 
 #include <vector>
@@ -67,12 +68,33 @@ void Solver::set_R_gimbal2world(const Eigen::Quaterniond & q)
 //solvePnP（获得姿态）
 void Solver::solve(Armor & armor) const
 {
+  const auto & image_points =
+    armor.traditional_points.empty() ? armor.points : armor.traditional_points;
+  solve(armor, image_points);
+}
+
+void Solver::solve(std::list<Armor> & armors) const
+{
+  std::map<std::pair<Color, ArmorName>, std::vector<Armor *>> armor_groups;
+  for (auto & armor : armors) armor_groups[{armor.color, armor.name}].push_back(&armor);
+
+  for (const auto & [_, armor_group] : armor_groups) {
+    const auto use_traditional =
+      armor_group.size() == 1 && !armor_group.front()->traditional_points.empty();
+    for (auto * armor : armor_group) {
+      solve(*armor, use_traditional ? armor->traditional_points : armor->points);
+    }
+  }
+}
+
+void Solver::solve(Armor & armor, const std::vector<cv::Point2f> & image_points) const
+{
   const auto & object_points =
     (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
 
   cv::Vec3d rvec, tvec;
   cv::solvePnP(
-    object_points, armor.points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
+    object_points, image_points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
     cv::SOLVEPNP_IPPE);
 
   Eigen::Vector3d xyz_in_camera;
@@ -103,7 +125,7 @@ void Solver::solve(Armor & armor) const
                      armor.name == ArmorName::five);
   if (is_balance) return;
 
-  optimize_yaw(armor);
+  optimize_yaw(armor, image_points);
 }
 
 std::vector<cv::Point2f> Solver::reproject_armor(
@@ -212,7 +234,7 @@ double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
   return error;
 }
 
-void Solver::optimize_yaw(Armor & armor) const
+void Solver::optimize_yaw(Armor & armor, const std::vector<cv::Point2f> & image_points) const
 {
   Eigen::Vector3d gimbal_ypr = tools::eulers(R_gimbal2world_, 2, 1, 0);
 
@@ -224,7 +246,8 @@ void Solver::optimize_yaw(Armor & armor) const
 
   for (int i = 0; i < SEARCH_RANGE; i++) {
     double yaw = tools::limit_rad(yaw0 + i * CV_PI / 180.0);
-    auto error = armor_reprojection_error(armor, yaw, (i - SEARCH_RANGE / 2) * CV_PI / 180.0);
+    auto error = armor_reprojection_error(
+      armor, image_points, yaw, (i - SEARCH_RANGE / 2) * CV_PI / 180.0);
 
     if (error < min_error) {
       min_error = error;
@@ -270,12 +293,13 @@ double Solver::SJTU_cost(
 }
 
 double Solver::armor_reprojection_error(
-  const Armor & armor, double yaw, const double & inclined) const
+  const Armor & armor, const std::vector<cv::Point2f> & image_points, double yaw,
+  const double & inclined) const
 {
-  auto image_points = reproject_armor(armor.xyz_in_world, yaw, armor.type, armor.name);
+  auto reprojected_points = reproject_armor(armor.xyz_in_world, yaw, armor.type, armor.name);
   auto error = 0.0;
-  for (int i = 0; i < 4; i++) error += cv::norm(armor.points[i] - image_points[i]);
-  // auto error = SJTU_cost(image_points, armor.points, inclined);
+  for (int i = 0; i < 4; i++) error += cv::norm(image_points[i] - reprojected_points[i]);
+  // auto error = SJTU_cost(reprojected_points, image_points, inclined);
 
   return error;
 }

@@ -230,8 +230,8 @@ void Tracker::state_machine(bool found)
 
 bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::time_point t)
 {
+  solver_.solve(armors);
   for (auto & armor : armors) {
-    solver_.solve(armor);
     if (armor.name == ArmorName::not_armor) continue;
 
     // 根据兵种优化初始化参数
@@ -279,6 +279,7 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   if (found_count == 0) return false;
 
+  solver_.solve(armors);
   for (auto & armor : armors) {
     if (
       armor.name != target_.name || armor.type != target_.armor_type
@@ -286,7 +287,6 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
     )
       continue;
 
-    solver_.solve(armor);
     if (armor.name == ArmorName::not_armor) continue;
 
     target_.update(armor);
