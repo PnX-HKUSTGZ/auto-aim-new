@@ -26,5 +26,16 @@ add_library(auto_aim OBJECT
     planner/planner.cpp
 )
 
-target_link_libraries(auto_aim io openvino::runtime tinympcstatic
+target_link_libraries(auto_aim PUBLIC io openvino::runtime tinympcstatic
     g2o::core g2o::types_slam3d g2o::solver_dense Sophus::Sophus)
+
+# types_slam3d depends on opengl_helper, but --as-needed otherwise removes it
+# from the executable's direct dependencies.  Keeping it direct allows the
+# executable's RUNPATH to find it without changing the lookup priority of
+# unrelated libraries (notably the HikRobot SDK selected by LD_LIBRARY_PATH).
+if(UNIX AND NOT APPLE)
+    target_link_libraries(auto_aim INTERFACE
+        "-Wl,--push-state,--no-as-needed"
+        g2o::opengl_helper
+        "-Wl,--pop-state")
+endif()

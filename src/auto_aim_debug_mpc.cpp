@@ -23,7 +23,7 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
+  "{@config-path   | configs/standard3.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
 {
@@ -123,8 +123,8 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, t);
-    //auto q = gimbal.q(t - std::chrono::milliseconds(1));
-    auto q = Eigen::Quaterniond(1, 0, 0, 0);
+    auto q = gimbal.q(t - std::chrono::milliseconds(1));
+    // auto q = Eigen::Quaterniond(1, 0, 0, 0);
 
     solver.set_R_gimbal2world(q);
     auto armors = yolo.detect(img);

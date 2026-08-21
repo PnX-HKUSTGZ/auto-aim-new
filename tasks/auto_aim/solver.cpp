@@ -282,7 +282,7 @@ bool Solver::use_ba_optimization(const Armor & armor, double armor_roll) const
                            armor.name == ArmorName::five);
   if (is_balance) return false;
 
-  return armor_roll < 15.0;
+  return abs(armor_roll) < 15.0;
 }
 
 double Solver::SJTU_cost(
