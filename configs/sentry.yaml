@@ -59,6 +59,18 @@ min_confidence: 0.8
 
 #####-----gimbal参数-----#####
 com_port: "/dev/ttyACM0"
+baud_rate: 115200
+vision_tx_max_hz: 100
+nav_tx_max_hz: 50
+vision_timeout_ms: 100
+nav_timeout_ms: 200
+decision_queue_capacity: 16
+cmd_vel_linear_scale: 0.4
+follow_mark_default_value: 2
+follow_mark_start_value: 1
+follow_mark_rough_value: 0
+follow_mark_hold_nav_count: 10
+follow_mark_zero_linear_scale: 0.5
 yaw_kp: 0
 yaw_kd: 0
 pitch_kp: 0

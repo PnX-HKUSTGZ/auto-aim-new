@@ -108,32 +108,39 @@ add_executable(planner_test_offline tests/planner_test_offline.cpp)
 target_link_libraries(planner_test_offline ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
 # 检查 ROS 环境
-find_package(ament_cmake QUIET)
-find_package(rclcpp QUIET)
-find_package(std_msgs QUIET)
-find_package(rosidl_typesupport_cpp QUIET)
-find_package(sp_msgs QUIET)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(rosidl_typesupport_cpp REQUIRED)
+# find_package(sp_msgs QUIET) 同济导航的自定义消息，未开源
 
 function(add_sentry_executable target source)
     add_executable(${target} ${source})
+    ament_target_dependencies(${target} rclcpp std_msgs geometry_msgs std_srvs)
     target_link_libraries(${target} ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
 endfunction()
 
-add_sentry_executable(sentry src/sentry.cpp)
-add_sentry_executable(sentry_bp src/sentry_bp.cpp)
-add_sentry_executable(sentry_debug src/sentry_debug.cpp)
-add_sentry_executable(sentry_multithread src/sentry_multithread.cpp)
-
 # 只有在找到 ROS 环境时才会添加 ROS2 测试目标
-if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND rosidl_typesupport_cpp_FOUND AND sp_msgs_FOUND)
+if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND geometry_msgs_FOUND AND std_srvs_FOUND AND rosidl_typesupport_cpp_FOUND)
     # 编译 ROS2 测试目标
+    add_sentry_executable(sentry src/sentry.cpp)
+    add_sentry_executable(sentry_bp src/sentry_bp.cpp)
+    add_sentry_executable(sentry_debug src/sentry_debug.cpp)
+    add_sentry_executable(sentry_multithread src/sentry_multithread.cpp)
+
     add_executable(publish_test tests/publish_test.cpp)
     add_executable(subscribe_test tests/subscribe_test.cpp)
-    add_executable(topic_loop_test tests/topic_loop_test.cpp)
+    # add_executable(topic_loop_test tests/topic_loop_test.cpp) sp_msgs强依赖，暂不处理
+
+    ament_target_dependencies(publish_test rclcpp)
+    ament_target_dependencies(subscribe_test rclcpp)
+    # ament_target_dependencies(topic_loop_test rclcpp)
 
     target_link_libraries(publish_test ${OpenCV_LIBS} fmt::fmt tools io auto_aim)
     target_link_libraries(subscribe_test ${OpenCV_LIBS} fmt::fmt tools io)
-    target_link_libraries(topic_loop_test ${OpenCV_LIBS} fmt::fmt tools io)
+    # target_link_libraries(topic_loop_test ${OpenCV_LIBS} fmt::fmt tools io)
 else()
     message(STATUS "ROS2 environment not found, skipping ROS2-related code.")
 endif()

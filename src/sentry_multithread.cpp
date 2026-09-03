@@ -45,8 +45,8 @@ int main(int argc, char * argv[])
   }
   auto config_path = cli.get<std::string>(0);
 
-  io::ROS2 ros2;
   io::Gimbal gimbal(config_path);
+  io::ROS2 ros2(gimbal);
   io::Camera camera(config_path);
   io::USBCamera usbcam1("/dev/usbcam_left", config_path);
   io::USBCamera usbcam2("/dev/usbcam_right", config_path);

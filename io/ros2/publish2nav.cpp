@@ -9,7 +9,7 @@
 
 namespace io
 {
-
+  
 Publish2Nav::Publish2Nav() : Node("auto_aim_target_pos_publisher")
 {
   publisher_ = this->create_publisher<std_msgs::msg::String>("auto_aim_target_pos", 10);
@@ -19,7 +19,7 @@ Publish2Nav::Publish2Nav() : Node("auto_aim_target_pos_publisher")
 
 Publish2Nav::~Publish2Nav()
 {
-  RCLCPP_INFO(this->get_logger(), "auto_aim_target_pos_publisher node shutting down.");
+  RCLCPP_INFO(this->get_logger(), "Publish2Nav node shutting down.");
 }
 
 void Publish2Nav::send_data(const Eigen::Vector4d & target_pos)
@@ -35,13 +35,13 @@ void Publish2Nav::send_data(const Eigen::Vector4d & target_pos)
   publisher_->publish(*message);
 
   // RCLCPP_INFO(
-  //   this->get_logger(), "auto_aim_target_pos_publisher node sent message: '%s'",
+  //   this->get_logger(), "publisher_to_DecisionMaking node sent message: '%s'",
   //   message->data.c_str());
 }
 
 void Publish2Nav::start()
 {
-  RCLCPP_INFO(this->get_logger(), "auto_aim_target_pos_publisher node starting to spin...");
+  RCLCPP_INFO(this->get_logger(), "Publish2Nav node starting to spin...");
   rclcpp::spin(this->shared_from_this());
 }
 

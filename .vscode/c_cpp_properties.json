@@ -7,17 +7,44 @@
             ],
             "includePath": [
                 "${workspaceFolder}/**",
+                "${workspaceFolder}/io/hikrobot/include",
+                "${workspaceFolder}/io/mindvision/include",
                 "${workspaceFolder}/io/serial/include",
-                "/usr/include/opencv4",
+                "${workspaceFolder}/tasks/auto_aim/planner/tinympc/..",
                 "/usr/include/eigen3",
-                "/opt/intel/openvino_2023.3.0/runtime/include/",
-                "/home/rm/sp_msg_25/install/sp_msgs/include/sp_msgs",
-                "/opt/ros/humble/include/**"
+                "/usr/include/opencv4",
+                "/opt/intel/openvino_2024.6.0/runtime/include",
+                "/usr/local/include",
+                "/usr/local/include/g2o/core",
+                "/usr/local/include/g2o/stuff",
+                "/usr/local/include/g2o/types/slam3d",
+                "/usr/local/include/sophus",
+                "/usr/local/include/ceres",
+                "/opt/ros/jazzy/include/**",
+                
             ],
-            "compilerPath": "/usr/bin/gcc",
+            "defines": [
+                "FMT_SHARED",
+                "OV_THREAD=OV_THREAD_TBB",
+                "SPDLOG_COMPILED_LIB",
+                "SPDLOG_FMT_EXTERNAL",
+                "SPDLOG_SHARED_LIB",
+                "_GLIBCXX_USE_CXX11_ABI=1"
+            ],
+            "compilerPath": "/usr/bin/g++",
             "cStandard": "c17",
             "cppStandard": "gnu++17",
-            "intelliSenseMode": "linux-gcc-x64"
+            "intelliSenseMode": "linux-gcc-x64",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "/usr/include",
+                    "/usr/local/include",
+                    "/opt/intel/openvino_2024.6.0/runtime/include",
+                    "/opt/ros/jazzy/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
         }
     ],
     "version": 4

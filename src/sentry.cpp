@@ -8,7 +8,7 @@
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
 #include "io/gimbal/gimbal.hpp"
-// #include "io/ros2/publish2nav.hpp"
+#include "io/ros2/publish2nav.hpp"
 #include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
@@ -28,7 +28,7 @@ using namespace std::chrono;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
+  "{@config-path   | /home/pnx/pnx_autoaim_sp/auto-aim-new/configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
 {
@@ -43,12 +43,12 @@ int main(int argc, char * argv[])
   }
   auto config_path = cli.get<std::string>(0);
 
-  io::ROS2 ros2;
   io::Gimbal gimbal(config_path);
+  io::ROS2 ros2(gimbal);
   io::Camera camera(config_path);
-  io::USBCamera usbcam1("/dev/usbcam_left", config_path);
-  io::USBCamera usbcam2("/dev/usbcam_right", config_path);
-  io::USBCamera back_camera("/dev/usbcam_back", config_path);
+  // io::USBCamera usbcam1("/dev/usbcam_left", config_path);
+  // io::USBCamera usbcam2("/dev/usbcam_right", config_path);
+  // io::USBCamera back_camera("/dev/usbcam_back", config_path);
 
   auto_aim::YOLO yolo(config_path, false);
   auto_aim::Solver solver(config_path);
@@ -99,12 +99,13 @@ int main(int argc, char * argv[])
 
     io::Command command{false, false, 0, 0};
 
-    /// 全向感知逻辑
-    if (tracker.state() == "lost")
-      command = decider.decide(yolo, gimbal_pos, usbcam1, usbcam2, back_camera);
-    else
-      command = aimer.aim(targets, timestamp, gs.bullet_speed);
+    // /// 全向感知逻辑
+    // if (tracker.state() == "lost")
+    //   command = decider.decide(yolo, gimbal_pos, usbcam1, usbcam2, back_camera);
+    // else
+    //   command = aimer.aim(targets, timestamp, gs.bullet_speed);
 
+    command = aimer.aim(targets, timestamp, gs.bullet_speed);
     /// 发射逻辑
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 

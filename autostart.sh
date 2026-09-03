@@ -1,9 +1,9 @@
 sleep 5
-cd /home/pnx/sp_vision/sp_vision_25/
+cd /home/pnx/pnx_autoaim_sp/auto-aim-new
 screen \
     -L \
     -Logfile logs/$(date "+%Y-%m-%d_%H-%M-%S").screenlog \
     -d \
     -m \
-    ./build/mt_standard ./configs/standard3.yaml
+    ./build/sentry ./configs/standard3.yaml
     # bash -c "./watchdog.sh"
