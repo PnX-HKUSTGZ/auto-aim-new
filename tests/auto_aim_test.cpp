@@ -1,15 +1,23 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <cstdint>
 #include <fstream>
+#include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
+#include <string>
+#include <vector>
 
+#include "foxglove_scene_schema.hpp"
 #include "tasks/auto_aim/aimer.hpp"
+#include "tasks/auto_aim/auto_aim_scene.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
+#include "tools/foxglove_server.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
@@ -20,7 +28,10 @@ const std::string keys =
   "{config-path c  | configs/standard3.yaml | yaml配置文件的路径}"
   "{start-index s  | 0                 | 视频起始帧下标    }"
   "{end-index e    | 0                 | 视频结束帧下标    }"
-  "{@input-path    | records/demo2  | avi和txt文件的路径}";
+  "{foxglove       | true              | 启用 Foxglove 三维可视化 }"
+  "{foxglove-host  | 127.0.0.1         | Foxglove WebSocket 监听 IP }"
+  "{foxglove-port  | 8765              | Foxglove WebSocket 监听端口 }"
+  "{@input-path    | assets/demo/demo   | avi和txt文件的路径（不含扩展名）}";
 
 int main(int argc, char * argv[])
 {
@@ -34,6 +45,35 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>("config-path");
   auto start_index = cli.get<int>("start-index");
   auto end_index = cli.get<int>("end-index");
+  const bool foxglove_enabled = cli.get<bool>("foxglove");
+  const std::string foxglove_host = cli.get<std::string>("foxglove-host");
+  const int foxglove_port = cli.get<int>("foxglove-port");
+  if (!cli.check()) {
+    cli.printErrors();
+    return 1;
+  }
+  if (foxglove_enabled && (foxglove_port < 1 || foxglove_port > 65535)) {
+    tools::logger()->error("Foxglove port must be in [1, 65535]");
+    return 1;
+  }
+
+  std::unique_ptr<tools::FoxgloveServer> foxglove;
+  if (foxglove_enabled) {
+    try {
+      foxglove = std::make_unique<tools::FoxgloveServer>(
+        foxglove_host, static_cast<std::uint16_t>(foxglove_port),
+        std::vector<tools::FoxgloveServer::Channel>{
+          {1, "/auto_aim/targets", "foxglove.SceneUpdate", tools::kFoxgloveSceneSchema},
+          {2, "/auto_aim/transforms", "foxglove.FrameTransform",
+           tools::kFoxgloveTransformSchema}});
+      tools::logger()->info(
+        "Foxglove: ws://{}:{}, topics /auto_aim/targets + /auto_aim/transforms, frame world",
+        foxglove_host, foxglove_port);
+    } catch (const std::exception & error) {
+      tools::logger()->error("Cannot start Foxglove: {}", error.what());
+      return 1;
+    }
+  }
 
   tools::Plotter plotter;
   tools::Exiter exiter;
@@ -42,11 +82,17 @@ int main(int argc, char * argv[])
   auto text_path = fmt::format("{}.txt", input_path);
   cv::VideoCapture video(video_path);
   std::ifstream text(text_path);
+  if (!video.isOpened() || !text.is_open()) {
+    tools::logger()->error("Cannot open replay input: {}.avi + {}.txt", input_path, input_path);
+    return 1;
+  }
 
   auto_aim::YOLO yolo(config_path);
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
+  auto_aim::AutoAimVisualizer auto_aim_visualizer(config_path);
+  constexpr double bullet_speed = 27.0;
 
   cv::Mat img, drawing;
   auto t0 = std::chrono::steady_clock::now();
@@ -62,14 +108,20 @@ int main(int argc, char * argv[])
     text >> t >> w >> x >> y >> z;
   }
 
+  bool input_exhausted = false;
   for (int frame_count = start_index; !exiter.exit(); frame_count++) {
     if (end_index > 0 && frame_count > end_index) break;
 
-    video.read(img);
-    if (img.empty()) break;
+    if (!video.read(img) || img.empty()) {
+      input_exhausted = true;
+      break;
+    }
 
     double t, w, x, y, z;
-    text >> t >> w >> x >> y >> z;
+    if (!(text >> t >> w >> x >> y >> z)) {
+      input_exhausted = true;
+      break;
+    }
     auto timestamp = t0 + std::chrono::microseconds(int(t * 1e6));
 
     /// 自瞄核心逻辑
@@ -83,7 +135,7 @@ int main(int argc, char * argv[])
     auto targets = tracker.track(armors, timestamp);
 
     auto aimer_start = std::chrono::steady_clock::now();
-    auto command = aimer.aim(targets, timestamp, 27, false);
+    auto command = aimer.aim(targets, timestamp, bullet_speed, false);
 
     if (
       !targets.empty() && aimer.debug_aim_point.valid &&
@@ -91,6 +143,22 @@ int main(int argc, char * argv[])
       command.shoot = true;
 
     if (command.control) last_command = command;
+
+    if (foxglove) {
+      const auto timestamp_ns = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch()).count());
+      const Eigen::Quaterniond attitude(solver.R_gimbal2world());
+      const double invalid = std::numeric_limits<double>::quiet_NaN();
+      const auto scene = auto_aim_visualizer.make_scene(
+        targets, command.control ? bullet_speed : invalid,
+        command.control ? command.yaw : invalid,
+        command.control ? command.pitch : invalid, attitude, timestamp_ns);
+      foxglove->publish(
+        timestamp_ns,
+        {{2, auto_aim_visualizer.make_gimbal_transform(attitude, timestamp_ns).dump()},
+         {1, scene.dump()}});
+    }
     /// 调试输出
 
     auto finish = std::chrono::steady_clock::now();
@@ -198,6 +266,16 @@ int main(int argc, char * argv[])
     cv::imshow("reprojection", img);
     auto key = cv::waitKey(30);
     if (key == 'q') break;
+  }
+
+  // Keep the last published snapshot and the WebSocket connection alive after a
+  // replay reaches EOF. Otherwise Foxglove sees the server disappear and starts
+  // its automatic reconnect loop, which looks like a recurring disconnect.
+  if (input_exhausted && foxglove && !exiter.exit()) {
+    tools::logger()->info("Replay input ended; keeping Foxglove connected (press q or Ctrl-C to exit)");
+    while (!exiter.exit()) {
+      if (cv::waitKey(50) == 'q') break;
+    }
   }
 
   return 0;

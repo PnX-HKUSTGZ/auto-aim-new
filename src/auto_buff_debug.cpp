@@ -3,12 +3,11 @@
 #include <string>
 
 #include "io/camera.hpp"
-#include "io/cboard.hpp"
+#include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_detector.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
+#include "tasks/auto_buff/rune_camera.hpp"
+#include "tasks/auto_buff/rune_detector.hpp"
+#include "tasks/auto_buff/rune_tracker.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -37,15 +36,14 @@ int main(int argc, char * argv[])
   tools::Recorder recorder;
   tools::Exiter exiter;
 
-  // 初始化C板、相机
-  io::CBoard cboard(config_path);
+  // 初始化云台、相机
+  io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
   // 初始化识别器、解算器、追踪器、瞄准器
-  auto_buff::Buff_Detector detector(config_path);
-  auto_buff::Solver solver(config_path);
-  auto_buff::SmallTarget target;
-  // auto_buff::BigTarget target;
+  auto_buff::RuneDetector detector(config_path);
+  auto_buff::RuneCamera camera_model(config_path);
+  auto_buff::RuneTargetTracker target_tracker(config_path);
   auto_buff::Aimer aimer(config_path);
 
   cv::Mat img;
@@ -54,88 +52,40 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, t);
-    q = cboard.imu_at(t);
+    q = gimbal.q(t);
+    auto gs = gimbal.state();
     // recorder.record(img, q, t);
 
     // -------------- 打符核心逻辑 --------------
 
-    solver.set_R_gimbal2world(q);
+    camera_model.set_gimbal_orientation(q);
 
-    auto power_runes = detector.detect(img);
+    const auto camera_pose = camera_model.pose();
+    const auto inactive_targets = detector.detect(
+      img, auto_buff::PowerRuneType::Small, t, camera_pose, camera_model);
+    auto rune_target = target_tracker.track(
+      inactive_targets, img, camera_pose, camera_model);
+    auto command = aimer.aim(target_tracker, gs.bullet_speed, true);
 
-    solver.solve(power_runes);
-
-    target.get_target(power_runes, t);
-
-    auto target_copy = target;
-
-    auto command = aimer.aim(target_copy, t, cboard.bullet_speed, true);
-
-    cboard.send(command);
+    gimbal.send(
+      command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
 
     // -------------- 调试输出 --------------
 
     nlohmann::json data;
 
-    // buff原始观测数据
-    if (power_runes.has_value()) {
-      const auto & p = power_runes.value();
-      data["buff_R_yaw"] = p.ypd_in_world[0];
-      data["buff_R_pitch"] = p.ypd_in_world[1];
-      data["buff_R_dis"] = p.ypd_in_world[2];
-      data["buff_yaw"] = p.ypr_in_world[0] * 57.3;
-      data["buff_pitch"] = p.ypr_in_world[1] * 57.3;
-      data["buff_roll"] = p.ypr_in_world[2] * 57.3;
-    }
-
-    if (!target.is_unsolve()) {
-      auto & p = power_runes.value();
-
-      // 显示
-      for (int i = 0; i < 4; i++) tools::draw_point(img, p.target().points[i]);
-      tools::draw_point(img, p.target().center, {0, 0, 255}, 3);
-      tools::draw_point(img, p.r_center, {0, 0, 255}, 3);
-
-      // 当前帧target更新后buff
-      auto Rxyz_in_world_now = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      auto image_points =
-        solver.reproject_buff(Rxyz_in_world_now, target.ekf_x()[4], target.ekf_x()[5]);
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {0, 255, 0});
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {0, 255, 0});
-
-      // buff瞄准位置(预测)
-      double dangle = target.ekf_x()[5] - target_copy.ekf_x()[5];
-      auto Rxyz_in_world_pre = target.point_buff2world(Eigen::Vector3d(0.0, 0.0, 0.0));
-      image_points =
-        solver.reproject_buff(Rxyz_in_world_pre, target_copy.ekf_x()[4], target_copy.ekf_x()[5]);
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {255, 0, 0});
-      tools::draw_points(
-        img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {255, 0, 0});
-
-      // 观测器内部数据
-      Eigen::VectorXd x = target.ekf_x();
-      data["R_yaw"] = x[0];
-      data["R_V_yaw"] = x[1];
-      data["R_pitch"] = x[2];
-      data["R_dis"] = x[3];
-      data["yaw"] = x[4] * 57.3;
-
-      data["angle"] = x[5] * 57.3;
-      data["spd"] = x[6] * 57.3;
-      if (x.size() >= 10) {
-        data["spd"] = x[6];
-        data["a"] = x[7];
-        data["w"] = x[8];
-        data["fi"] = x[9];
-        data["spd0"] = target.spd;
-      }
+    if (rune_target) {
+      const Eigen::Vector3d ypd = tools::xyz2ypd(rune_target->rune_center);
+      data["buff_R_yaw"] = ypd[0];
+      data["buff_R_pitch"] = ypd[1];
+      data["buff_R_dis"] = ypd[2];
+      data["phase"] = rune_target->phase * 57.3;
+      data["angular_velocity"] = rune_target->angular_velocity;
+      data["inactive_target_num"] = rune_target->inactive_target_num;
     }
 
     // 云台响应情况
-    Eigen::Vector3d ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
+    Eigen::Vector3d ypr = tools::eulers(camera_model.R_gimbal2world(), 2, 1, 0);
     data["gimbal_yaw"] = ypr[0] * 57.3;
     data["gimbal_pitch"] = ypr[1] * 57.3;
 

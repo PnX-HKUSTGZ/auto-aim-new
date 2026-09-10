@@ -8,6 +8,8 @@
 #include <optional>
 
 #include "buff_type.hpp"
+#include "rune_camera.hpp"
+#include "rune_tracker.hpp"
 #include "tools/math_tools.hpp"
 namespace auto_buff
 {
@@ -21,6 +23,8 @@ public:
 
   Eigen::Matrix3d R_gimbal2world() const;
 
+  CameraPose camera_pose() const;
+
   void set_R_gimbal2world(const Eigen::Quaterniond & q);
 
   void solve(std::optional<PowerRune> & ps) const;
@@ -30,6 +34,8 @@ public:
 
   std::vector<cv::Point2f> reproject_buff(
     const Eigen::Vector3d & xyz_in_world, double yaw, double row) const;
+
+  std::optional<cv::Point2f> reproject_world_point(const Eigen::Vector3d & point_in_world) const;
 
 private:
   cv::Mat camera_matrix_;

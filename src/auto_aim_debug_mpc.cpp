@@ -2,17 +2,28 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
+#include <optional>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
+#include "tasks/auto_aim/auto_aim_scene.hpp"
 #include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
+#include "foxglove_scene_schema.hpp"
 #include "tools/exiter.hpp"
+#include "tools/foxglove_server.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
@@ -23,7 +34,10 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/standard3.yaml | 位置参数，yaml配置文件路径 }";
+  "{@config-path   | configs/standard3.yaml | 位置参数，yaml配置文件路径 }"
+  "{foxglove       | true                   | 启用 Foxglove 三维可视化 }"
+  "{foxglove-host  | 127.0.0.1              | Foxglove WebSocket 监听 IP }"
+  "{foxglove-port  | 8765                   | Foxglove WebSocket 监听端口 }";
 
 int main(int argc, char * argv[])
 {
@@ -36,6 +50,35 @@ int main(int argc, char * argv[])
     cli.printMessage();
     return 0;
   }
+  const bool foxglove_enabled = cli.get<bool>("foxglove");
+  const std::string foxglove_host = cli.get<std::string>("foxglove-host");
+  const int foxglove_port = cli.get<int>("foxglove-port");
+  if (!cli.check()) {
+    cli.printErrors();
+    return 1;
+  }
+  if (foxglove_enabled && (foxglove_port < 1 || foxglove_port > 65535)) {
+    tools::logger()->error("Foxglove port must be in [1, 65535]");
+    return 1;
+  }
+
+  std::unique_ptr<tools::FoxgloveServer> foxglove;
+  if (foxglove_enabled) {
+    try {
+      foxglove = std::make_unique<tools::FoxgloveServer>(
+        foxglove_host, static_cast<std::uint16_t>(foxglove_port),
+        std::vector<tools::FoxgloveServer::Channel>{
+          {1, "/auto_aim/targets", "foxglove.SceneUpdate", tools::kFoxgloveSceneSchema},
+          {2, "/auto_aim/transforms", "foxglove.FrameTransform",
+           tools::kFoxgloveTransformSchema}});
+      tools::logger()->info(
+        "Foxglove: ws://{}:{}, topics /auto_aim/targets + /auto_aim/transforms, frame world",
+        foxglove_host, foxglove_port);
+    } catch (const std::exception & error) {
+      tools::logger()->error("Cannot start Foxglove: {}", error.what());
+      return 1;
+    }
+  }
 
   io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
@@ -44,6 +87,16 @@ int main(int argc, char * argv[])
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
+  auto_aim::AutoAimVisualizer auto_aim_visualizer(config_path);
+
+  struct VisualizationInput
+  {
+    double bullet_speed = std::numeric_limits<double>::quiet_NaN();
+    double yaw = std::numeric_limits<double>::quiet_NaN();
+    double pitch = std::numeric_limits<double>::quiet_NaN();
+  };
+  std::mutex visualization_mutex;
+  VisualizationInput latest_visualization_input;
 
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
@@ -59,6 +112,15 @@ int main(int argc, char * argv[])
       auto gs = gimbal.state();
       auto plan = planner.plan(target, gs.bullet_speed);
       auto now = std::chrono::steady_clock::now();
+
+      VisualizationInput visualization_input;
+      if (plan.control) {
+        visualization_input = {gs.bullet_speed, plan.yaw, plan.pitch};
+      }
+      {
+        std::lock_guard<std::mutex> lock(visualization_mutex);
+        latest_visualization_input = visualization_input;
+      }
 
       gimbal.send(
         plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
@@ -133,6 +195,27 @@ int main(int argc, char * argv[])
       target_queue.push(targets.front());
     else
       target_queue.push(std::nullopt);
+
+    if (foxglove) {
+      const auto timestamp_ns = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch()).count());
+      VisualizationInput visualization_input;
+      {
+        std::lock_guard<std::mutex> lock(visualization_mutex);
+        visualization_input = latest_visualization_input;
+      }
+      const Eigen::Quaterniond attitude(solver.R_gimbal2world());
+      foxglove->publish(
+        timestamp_ns,
+        {{2, auto_aim_visualizer.make_gimbal_transform(attitude, timestamp_ns).dump()},
+         {1,
+          auto_aim_visualizer
+            .make_scene(
+              targets, visualization_input.bullet_speed, visualization_input.yaw,
+              visualization_input.pitch, attitude, timestamp_ns)
+            .dump()}});
+    }
 
     nlohmann::json pixel_data;
     pixel_data["t"] = tools::delta_time(std::chrono::steady_clock::now(), pixel_plot_t0);

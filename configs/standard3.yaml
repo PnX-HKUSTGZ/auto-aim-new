@@ -7,7 +7,7 @@ classify_model: assets/tiny_resnet.onnx
 yolo11_model_path: assets/yolo11.xml
 yolov8_model_path: assets/yolov8.xml
 yolov5_model_path: assets/yolov5.xml
-device: GPU
+device: CPU
 min_confidence: 0.8
 use_traditional: true
 
@@ -99,8 +99,40 @@ Q_pitch: [9e6, 0]
 R_pitch: [1]
 
 #####-----buff_detector参数-----#####
-model: "assets/yolo11_buff_int8.xml"
-
+model: "assets/szu-model.xml"
+buff_refine:
+  extend_rotated_rect: 1.4
+  red_minus_blue_threshold: 30
+  blue_minus_red_threshold: 62
+  armor_area_relative_error_threshold: 0.35
+  light_arm_line_samples: 15
+  solidity_threshold_ellipse: 0.8
+  solidity_threshold_rectangular: 0.66
+  expected_aspect_ratio: 5.0
+  aspect_ratio_relative_error_threshold: 0.42
+  approx_error_tolerance: 0.01
+  visualize_observation: true
+  visualize_refined: true
+  visualize_plane: true
+  visualize_motion: true
 #####-----buff_aimer参数-----#####
 fire_gap_time: 0.700   # s
 predict_time: 0.120     # s
+buff_decision:
+  data_life: 0.20
+  recover_time: 0.30
+  small:
+    max_life_time: 5.70
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.70
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+  big:
+    max_life_time: 20.00
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.40
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+    switch_confirm_count: 5

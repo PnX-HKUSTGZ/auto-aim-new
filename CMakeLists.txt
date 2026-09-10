@@ -15,8 +15,7 @@ find_package(nlohmann_json REQUIRED)
 set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/")
 find_package(OpenVINO REQUIRED)
 
-# Third-party libraries (g2o, Sophus) installed at custom prefix
-list(APPEND CMAKE_PREFIX_PATH "/home/pnx/rmvision/pnx_autoaim/third_party_install")
+# For a custom dependency installation, pass -DCMAKE_PREFIX_PATH=<install-prefix>.
 find_package(g2o REQUIRED)
 find_package(Sophus REQUIRED)
 
@@ -35,10 +34,25 @@ add_subdirectory(tasks/omniperception)
 add_executable(standard src/standard.cpp)
 add_executable(mt_standard src/mt_standard.cpp)
 add_executable(standard_mpc src/standard_mpc.cpp)
-add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
+add_executable(
+    auto_aim_debug_mpc
+    src/auto_aim_debug_mpc.cpp
+    tasks/auto_aim/auto_aim_scene.cpp)
 add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
 add_executable(auto_buff_debug src/auto_buff_debug.cpp)
 add_executable(auto_buff_debug_mpc src/auto_buff_debug_mpc.cpp)
+
+# Foxglove transport is linked only into the debug visualizers and visualization tests.
+find_package(Boost 1.70 REQUIRED)
+find_package(Threads REQUIRED)
+file(READ "${PROJECT_SOURCE_DIR}/assets/foxglove/SceneUpdate.json" FOXGLOVE_SCENE_SCHEMA)
+file(READ "${PROJECT_SOURCE_DIR}/assets/foxglove/FrameTransform.json" FOXGLOVE_TRANSFORM_SCHEMA)
+configure_file(tools/foxglove_scene_schema.hpp.in generated/foxglove_scene_schema.hpp @ONLY)
+add_library(buff_visualization STATIC tools/foxglove_server.cpp tasks/auto_buff/rune_scene.cpp)
+target_link_libraries(buff_visualization PUBLIC Boost::boost Threads::Threads nlohmann_json::nlohmann_json)
+target_include_directories(buff_visualization PUBLIC "${PROJECT_BINARY_DIR}/generated")
+target_link_libraries(auto_buff_debug_mpc buff_visualization)
+target_link_libraries(auto_aim_debug_mpc buff_visualization)
 add_executable(uav src/uav.cpp)
 add_executable(uav_debug src/uav_debug.cpp)
 
@@ -47,8 +61,8 @@ target_link_libraries(mt_standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto
 target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(mt_auto_aim_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
-target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
-target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
+target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
@@ -66,8 +80,20 @@ target_link_libraries(calibrate_robotworld_handeye ${OpenCV_LIBS} fmt::fmt yaml-
 target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
 
 ##################tests##################
-add_executable(auto_aim_test tests/auto_aim_test.cpp)
+add_executable(
+    auto_aim_test
+    tests/auto_aim_test.cpp
+    tasks/auto_aim/auto_aim_scene.cpp)
+add_executable(
+    auto_aim_scene_test
+    tests/auto_aim_scene_test.cpp
+    tasks/auto_aim/auto_aim_scene.cpp)
 add_executable(auto_buff_test tests/auto_buff_test.cpp)
+add_executable(rune_camera_test tests/rune_camera_test.cpp)
+add_executable(rune_motion_estimator_test tests/rune_motion_estimator_test.cpp)
+add_executable(rune_decision_state_machine_test tests/rune_decision_state_machine_test.cpp)
+add_executable(rune_scene_test tests/rune_scene_test.cpp)
+target_link_libraries(rune_scene_test buff_visualization auto_buff tools io ${OpenCV_LIBS} fmt::fmt yaml-cpp)
 add_executable(camera_detect_test tests/camera_detect_test.cpp)
 add_executable(camera_test tests/camera_test.cpp)
 add_executable(camera_thread_test tests/camera_thread_test.cpp)
@@ -82,8 +108,18 @@ add_executable(handeye_test tests/handeye_test.cpp)
 add_executable(dm_test tests/dm_test.cpp)
 add_executable(minimum_vision_system tests/minimum_vision_system.cpp)
 
-target_link_libraries(auto_aim_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(
+    auto_aim_test
+    buff_visualization ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(
+    auto_aim_scene_test
+    buff_visualization ${OpenCV_LIBS} fmt::fmt yaml-cpp nlohmann_json::nlohmann_json tools io auto_aim)
 target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+target_link_libraries(rune_camera_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+target_link_libraries(rune_motion_estimator_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+target_link_libraries(
+    rune_decision_state_machine_test
+    ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(camera_detect_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools auto_aim io)
 target_link_libraries(camera_test ${OpenCV_LIBS} fmt::fmt tools io)
 target_link_libraries(camera_thread_test ${OpenCV_LIBS} fmt::fmt auto_aim tools io)

@@ -1,4 +1,6 @@
+#include <atomic>
 #include <chrono>
+#include <mutex>
 #include <opencv2/opencv.hpp>
 #include <thread>
 
@@ -11,10 +13,9 @@
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_detector.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
+#include "tasks/auto_buff/rune_camera.hpp"
+#include "tasks/auto_buff/rune_detector.hpp"
+#include "tasks/auto_buff/rune_tracker.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -52,57 +53,70 @@ int main(int argc, char * argv[])
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
 
-  auto_buff::Buff_Detector buff_detector(config_path);
-  auto_buff::Solver buff_solver(config_path);
-  auto_buff::SmallTarget buff_small_target;
-  auto_buff::BigTarget buff_big_target;
+  auto_buff::RuneDetector buff_detector(config_path);
+  auto_buff::RuneCamera buff_camera(config_path);
+  auto_buff::RuneTargetTracker buff_target_tracker(config_path);
   auto_buff::Aimer buff_aimer(config_path);
 
   cv::Mat img;
-  Eigen::Quaterniond q;
   std::chrono::steady_clock::time_point t;
 
   std::atomic<bool> quit = false;
 
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
+  // 模式交接与自瞄发送互斥，保证打符开始前旧自瞄指令已发送完毕。
+  std::mutex command_mutex;
 
   auto plan_thread = std::thread([&]() {
-    auto t0 = std::chrono::steady_clock::now();
-    uint16_t last_bullet_count = 0;
-
     while (!quit) {
-      if (!target_queue.empty() && mode == io::GimbalMode::AUTO_AIM) {
-        auto target = target_queue.front();
-        auto gs = gimbal.state();
-        auto plan = planner.plan(target, gs.bullet_speed);
+      {
+        std::lock_guard<std::mutex> lock(command_mutex);
+        if (!target_queue.empty() && mode == io::GimbalMode::AUTO_AIM) {
+          auto target = target_queue.front();
+          auto gs = gimbal.state();
+          auto plan = planner.plan(target, gs.bullet_speed);
 
-        gimbal.send(
-          plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-          plan.pitch_acc);
-
-        std::this_thread::sleep_for(10ms);
-      } else
-        std::this_thread::sleep_for(200ms);
+          gimbal.send(
+            plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
+            plan.pitch_acc);
+        }
+      }
+      std::this_thread::sleep_for(10ms);
     }
   });
 
   while (!exiter.exit()) {
-    mode = gimbal.mode();
+    const auto current_mode = gimbal.mode();
 
-    if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", gimbal.str(mode));
-      last_mode = mode.load();
+    if (last_mode != current_mode) {
+      {
+        std::lock_guard<std::mutex> lock(command_mutex);
+        target_queue.push(std::nullopt);
+        mode = current_mode;
+      }
+      if (current_mode == io::GimbalMode::SMALL_BUFF || current_mode == io::GimbalMode::BIG_BUFF) {
+        buff_target_tracker = auto_buff::RuneTargetTracker(config_path);
+        buff_aimer = auto_buff::Aimer(config_path);
+      }
+      tools::logger()->info("Switch to {}", gimbal.str(current_mode));
+      last_mode = current_mode;
     }
 
     camera.read(img, t);
+    if (img.empty()) {
+      std::lock_guard<std::mutex> lock(command_mutex);
+      target_queue.push(std::nullopt);
+      gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+      continue;
+    }
     auto q = gimbal.q(t);
     auto gs = gimbal.state();
     recorder.record(img, q, t);
     solver.set_R_gimbal2world(q);
 
     /// 自瞄
-    if (mode.load() == io::GimbalMode::AUTO_AIM) {
+    if (current_mode == io::GimbalMode::AUTO_AIM) {
       auto armors = yolo.detect(img);
       auto targets = tracker.track(armors, t);
       if (!targets.empty())
@@ -112,23 +126,20 @@ int main(int argc, char * argv[])
     }
 
     /// 打符
-    else if (mode.load() == io::GimbalMode::SMALL_BUFF || mode.load() == io::GimbalMode::BIG_BUFF) {
-      buff_solver.set_R_gimbal2world(q);
+    else if (
+      current_mode == io::GimbalMode::SMALL_BUFF || current_mode == io::GimbalMode::BIG_BUFF) {
+      buff_camera.set_gimbal_orientation(q);
 
-      auto power_runes = buff_detector.detect(img);
-
-      buff_solver.solve(power_runes);
-
-      auto_aim::Plan buff_plan;
-      if (mode.load() == io::GimbalMode::SMALL_BUFF) {
-        buff_small_target.get_target(power_runes, t);
-        auto target_copy = buff_small_target;
-        buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
-      } else if (mode.load() == io::GimbalMode::BIG_BUFF) {
-        buff_big_target.get_target(power_runes, t);
-        auto target_copy = buff_big_target;
-        buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
-      }
+      const auto camera_pose = buff_camera.pose();
+      const auto buff_type =
+        current_mode == io::GimbalMode::SMALL_BUFF ? auto_buff::PowerRuneType::Small
+                                                   : auto_buff::PowerRuneType::Big;
+      const auto inactive_targets =
+        buff_detector.detect(img, buff_type, t, camera_pose, buff_camera);
+      auto rune_target =
+        buff_target_tracker.track(inactive_targets, img, camera_pose, buff_camera);
+      // 实机使用采集时间补偿处理延迟。
+      const auto buff_plan = buff_aimer.mpc_aim(buff_target_tracker, gs, true);
       gimbal.send(
         buff_plan.control, buff_plan.fire, buff_plan.yaw, buff_plan.yaw_vel, buff_plan.yaw_acc,
         buff_plan.pitch, buff_plan.pitch_vel, buff_plan.pitch_acc);

@@ -1,0 +1,83 @@
+#pragma once
+
+namespace tools
+{
+// Official Foxglove JSON schema, embedded at configure time for relocation-safe startup.
+inline constexpr char kFoxgloveSceneSchema[] = R"foxglove(@FOXGLOVE_SCENE_SCHEMA@)foxglove";
+inline constexpr char kFoxgloveTransformSchema[] = R"foxglove(@FOXGLOVE_TRANSFORM_SCHEMA@)foxglove";
+inline constexpr char kBuffTelemetrySchema[] = R"foxglove(
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "auto_buff.Telemetry",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "video_time_s": {"type": "number"},
+    "observation_valid": {"type": "integer"},
+    "tracking_valid": {"type": "integer"},
+    "mode_big": {"type": "integer"},
+    "inactive_target_count": {"type": "integer"},
+    "prediction_seconds": {"type": "number"},
+    "rvec_x": {"type": "number", "description": "Model-to-camera Rodrigues vector X (rad)"},
+    "rvec_y": {"type": "number", "description": "Model-to-camera Rodrigues vector Y (rad)"},
+    "rvec_z": {"type": "number", "description": "Model-to-camera Rodrigues vector Z (rad)"},
+    "tvec_x": {"type": "number", "description": "Model origin in camera frame X (m)"},
+    "tvec_y": {"type": "number", "description": "Model origin in camera frame Y (m)"},
+    "tvec_z": {"type": "number", "description": "Model origin in camera frame Z (m)"},
+    "plane_normal_x": {"type": "number"},
+    "plane_normal_y": {"type": "number"},
+    "plane_normal_z": {"type": "number"},
+    "plane_offset_m": {"type": "number"},
+    "observed_rune_center_x_m": {"type": "number"},
+    "observed_rune_center_y_m": {"type": "number"},
+    "observed_rune_center_z_m": {"type": "number"},
+    "observed_armor_center_x_m": {"type": "number"},
+    "observed_armor_center_y_m": {"type": "number"},
+    "observed_armor_center_z_m": {"type": "number"},
+    "tracked_rune_center_x_m": {"type": "number"},
+    "tracked_rune_center_y_m": {"type": "number"},
+    "tracked_rune_center_z_m": {"type": "number"},
+    "tracked_armor_center_x_m": {"type": "number"},
+    "tracked_armor_center_y_m": {"type": "number"},
+    "tracked_armor_center_z_m": {"type": "number"},
+    "phase_rad": {"type": "number"},
+    "phase_deg": {"type": "number"},
+    "angular_velocity_rad_s": {"type": "number"},
+    "predicted_phase_rad": {"type": "number"},
+    "predicted_armor_center_x_m": {"type": "number"},
+    "predicted_armor_center_y_m": {"type": "number"},
+    "predicted_armor_center_z_m": {"type": "number"},
+    "model_phase_cos_coefficient": {"type": "number"},
+    "model_phase_sin_coefficient": {"type": "number"},
+    "model_phase_linear_velocity_rad_s": {"type": "number"},
+    "model_phase_constant_offset_rad": {"type": "number"},
+    "model_speed_angular_frequency_rad_s": {"type": "number"},
+    "model_speed_amplitude_rad_s": {"type": "number"},
+    "model_speed_phase_shift_rad": {"type": "number"},
+    "bullet_speed_m_s": {"type": "number"},
+    "plan_control": {"type": "integer"},
+    "plan_fire": {"type": "integer"},
+    "plan_yaw_rad": {"type": "number"},
+    "plan_pitch_rad": {"type": "number"},
+    "plan_yaw_velocity_rad_s": {"type": "number"},
+    "plan_pitch_velocity_rad_s": {"type": "number"},
+    "plan_yaw_acceleration_rad_s2": {"type": "number"},
+    "plan_pitch_acceleration_rad_s2": {"type": "number"},
+    "video_time": {"type": "number"},
+    "buff_R_yaw": {"type": "number"},
+    "buff_R_pitch": {"type": "number"},
+    "buff_R_dis": {"type": "number"},
+    "phase": {"type": "number"},
+    "angular_velocity": {"type": "number"},
+    "inactive_target_num": {"type": "integer"},
+    "plan_yaw": {"type": "number"},
+    "plan_pitch": {"type": "number"},
+    "plan_yaw_vel": {"type": "number"},
+    "plan_pitch_vel": {"type": "number"},
+    "plan_yaw_acc": {"type": "number"},
+    "plan_pitch_acc": {"type": "number"},
+    "shoot": {"type": "integer"}
+  }
+}
+)foxglove";
+}

@@ -121,3 +121,21 @@ aim_time: 0.150         # s
 wait_time: 0.300        # s
 command_fire_gap: 0.080 # s
 predict_time: 0.150     # s
+buff_decision:
+  data_life: 0.20
+  recover_time: 0.30
+  small:
+    max_life_time: 5.70
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.70
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+  big:
+    max_life_time: 20.00
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.40
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+    switch_confirm_count: 5

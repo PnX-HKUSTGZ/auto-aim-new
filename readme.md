@@ -57,6 +57,7 @@ IMU型号：使用C板内置BMI088作为IMU\
    - [MindVision SDK](https://mindvision.com.cn/category/software/sdk-installation-package/)或[HikRobot SDK](https://www.hikrobotics.com/cn2/source/support/software/MVS_STD_GML_V2.1.2_231116.zip)
    - [OpenVINO](https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html)
    - [Ceres](http://ceres-solver.org/installation.html)
+   - g2o、Sophus（需包含 CMake 配置文件）
    - 其余：
     ```bash
     sudo apt install -y \
@@ -80,6 +81,12 @@ IMU型号：使用C板内置BMI088作为IMU\
     cmake -B build
     make -C build/ -j`nproc`
     ```
+
+    若 g2o、Sophus、Ceres 安装在自定义目录，首次配置时指定安装前缀：
+    ```bash
+    cmake -B build -DCMAKE_PREFIX_PATH=/path/to/third_party_install
+    ```
+    将路径替换为实际安装目录。该路径保存在 `build/CMakeCache.txt` 中，后续可直接执行 `cmake -B build`。
 
 3. 运行demo:
     ```bash
@@ -168,7 +175,15 @@ IMU型号：使用C板内置BMI088作为IMU\
         # lrwxrwxrwx 1 root root 7 Jul 21 10:00 /dev/gimbal -> ttyACM0
         ```
 
+### 3.2.1 Foxglove 打符三维调试
+
+打符离线调试支持 Foxglove 三维显示机关平面、符叶位置和运动预测。
+编译运行 `auto_buff_debug_mpc` 后，在 Foxglove 连接 `ws://127.0.0.1:8765`，
+添加 3D 面板，选择 `world` 坐标系并开启 `/buff/scene`。
+完整编译、连接、颜色含义及排查步骤见 [能量机关 Foxglove 三维调试](docs/foxglove_buff.md)。
+
 ### 3.3 数据流图
+
 视觉相关模块如图3.1所示。其中，相机线程产生图像、时间戳，通过下位机线程获取对应的云台姿态四元数；图像经过识别器，获得装甲板的四个顶点像素坐标，以及其图案类别；估计器根据装甲板信息，获得目标单位的运动状态；决策器则根据当前的目标运动状态信息，预测目标的运动轨迹，从而判断最佳瞄准位置和最佳开火时机，形成指令发送给下位机；最后控制器和执行机构则根据该指令进行执行，从而完成一个完整的自瞄流程。
 ![数据流图](https://github.com/user-attachments/assets/b89ce42f-a769-49c5-b82a-d69aeac02925)
 图3.1 数据流图

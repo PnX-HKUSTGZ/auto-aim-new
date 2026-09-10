@@ -1,6 +1,7 @@
 #ifndef AUTO_AIM_MULTITHREAD__HPP
 #define AUTO_AIM_MULTITHREAD__HPP
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <list>
@@ -47,7 +48,8 @@ private:
   std::mutex mtx_;
   std::condition_variable cv_;
   std::thread thread_;
-  bool stop_, debug_;
+  std::atomic<bool> stop_;
+  bool debug_;
 
   void generate_command();
 };
