@@ -14,7 +14,6 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   detect_count_(0),
   temp_lost_count_(0),
   state_{"lost"},
-  pre_state_{"lost"},
   last_timestamp_(std::chrono::steady_clock::now()),
   omni_target_priority_{ArmorPriority::fifth}
 {
@@ -29,8 +28,12 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
 std::string Tracker::state() const { return state_; }
 
 std::list<Target> Tracker::track(
-  std::list<Armor> & armors, std::chrono::steady_clock::time_point t, bool use_enemy_color)//被主函数调用，返回targets
+  std::list<Armor> & armors, std::chrono::steady_clock::time_point t,
+  bool use_enemy_color)  //被主函数调用，返回targets
 {
+  // 首帧时间可能来自离线回放；后续只接收严格递增时间戳，避免倒退预测。
+  if (has_timestamp_ && t <= last_timestamp_) return {};
+  has_timestamp_ = true;
   auto dt = tools::delta_time(t, last_timestamp_);
   last_timestamp_ = t;
 
@@ -39,15 +42,8 @@ std::list<Target> Tracker::track(
     tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
     state_ = "lost";
   }
-  // 过滤掉非我方装甲板
-  armors.remove_if([&](const auto_aim::Armor & a) { return a.color != enemy_color_; });
-
-  // 过滤前哨站顶部装甲板
-  // armors.remove_if([this](const auto_aim::Armor & a) {
-  //   return a.name == ArmorName::outpost &&
-  //          solver_.oupost_reprojection_error(a, 27.5 * CV_PI / 180.0) <
-  //            solver_.oupost_reprojection_error(a, -15 * CV_PI / 180.0);
-  // });
+  // 参数为 false 时允许调用者自行决定颜色筛选策略。
+  if (use_enemy_color) armors.remove_if([&](const Armor & a) { return a.color != enemy_color_; });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -61,13 +57,21 @@ std::list<Target> Tracker::track(
   armors.sort(
     [](const auto_aim::Armor & a, const auto_aim::Armor & b) { return a.priority < b.priority; });
 
+  // 每帧先将所有候选装甲板解算到世界系，供跟踪和可视化使用。
+  solver_.solve(armors);
+  // PnP 失败会把类别改为 not_armor，必须在读取队首优先级之前移除。
+  armors.remove_if([](const Armor & armor) {
+    return armor.name == ArmorName::not_armor || !armor.xyz_in_world.allFinite() ||
+           !armor.ypd_in_world.allFinite() || !armor.ypr_in_world.allFinite();
+  });
+
   bool found;
   if (state_ == "lost") {
-    found = set_target(armors, t);//初始化target
+    found = set_target(armors, t);  //初始化target
   }
 
   else {
-    found = update_target(armors, t);//更新target
+    found = update_target(armors, t);  //更新target
   }
 
   state_machine(found);
@@ -79,12 +83,8 @@ std::list<Target> Tracker::track(
     return {};
   }
 
-  // 收敛效果检测：
-  if (
-    std::accumulate(
-      target_.ekf().recent_nis_failures.begin(), target_.ekf().recent_nis_failures.end(), 0) >=
-    (0.4 * target_.ekf().window_size)) {
-    tools::logger()->debug("[Target] Bad Converge Found!");
+  // 四维/八维观测分别经过正确 NIS 检验，窗口足够长后才判断持续异常。
+  if (state_ != "lost" && target_.bad_quality()) {
     state_ = "lost";
     return {};
   }
@@ -101,10 +101,19 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 {
   omniperception::DetectionResult switch_target{std::list<Armor>(), t, 0, 0};
   omniperception::DetectionResult temp_target{std::list<Armor>(), t, 0, 0};
-  if (!detection_queue.empty()) {
-    temp_target = detection_queue.front();
+  for (const auto & detection : detection_queue) {
+    temp_target = detection;
+    temp_target.armors.remove_if([&](const Armor & armor) {
+      return armor.name == ArmorName::not_armor || (use_enemy_color && armor.color != enemy_color_);
+    });
+    if (!temp_target.armors.empty()) break;
   }
+  if (use_enemy_color)
+    armors.remove_if([&](const Armor & armor) { return armor.color != enemy_color_; });
 
+  // 首帧时间可能来自离线回放；后续只接收严格递增时间戳，避免倒退预测。
+  if (has_timestamp_ && t <= last_timestamp_) return {switch_target, {}};
+  has_timestamp_ = true;
   auto dt = tools::delta_time(t, last_timestamp_);
   last_timestamp_ = t;
 
@@ -125,6 +134,14 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   // 按优先级排序，优先级最高在首位(优先级越高数字越小，1的优先级最高)
   armors.sort([](const Armor & a, const Armor & b) { return a.priority < b.priority; });
 
+  // 每帧先将所有候选装甲板解算到世界系，供跟踪和可视化使用。
+  solver_.solve(armors);
+  // PnP 失败会把类别改为 not_armor，必须在读取队首优先级之前移除。
+  armors.remove_if([](const Armor & armor) {
+    return armor.name == ArmorName::not_armor || !armor.xyz_in_world.allFinite() ||
+           !armor.ypd_in_world.allFinite() || !armor.ypr_in_world.allFinite();
+  });
+
   bool found;
   if (state_ == "lost") {
     found = set_target(armors, t);
@@ -132,6 +149,8 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 
   // 此时主相机画面中出现了优先级更高的装甲板，切换目标
   else if (state_ == "tracking" && !armors.empty() && armors.front().priority < target_.priority) {
+    // 新目标重新确认，不能继承旧目标 tracking 状态和检测次数。
+    state_ = "lost";
     found = set_target(armors, t);
     tools::logger()->debug("auto_aim switch target to {}", ARMOR_NAMES[armors.front().name]);
   }
@@ -141,26 +160,35 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     state_ == "tracking" && !temp_target.armors.empty() &&
     temp_target.armors.front().priority < target_.priority && target_.convergened()) {
     state_ = "switching";
+    temp_lost_count_ = 0;
+    detect_count_ = 0;
     switch_target = omniperception::DetectionResult{
       temp_target.armors, t, temp_target.delta_yaw, temp_target.delta_pitch};
-    omni_target_priority_ = temp_target.armors.front().priority;
+    const auto & expected = temp_target.armors.front();
+    omni_target_priority_ = expected.priority;
+    omni_target_name_ = expected.name;
+    omni_target_type_ = expected.type;
+    omni_target_color_ = expected.color;
     found = false;
     tools::logger()->debug("omniperception find higher priority target");
   }
 
   else if (state_ == "switching") {
-    found = !armors.empty() && armors.front().priority == omni_target_priority_;
-  }
-
-  else if (state_ == "detecting" && pre_state_ == "switching") {
-    found = set_target(armors, t);
+    // 查找预期类别而非仅比较优先级；命中当帧就初始化，避免输出旧目标。
+    std::list<Armor> expected_armors;
+    for (const auto & armor : armors) {
+      if (
+        armor.name == omni_target_name_ && armor.type == omni_target_type_ &&
+        armor.color == omni_target_color_ && armor.priority == omni_target_priority_)
+        expected_armors.push_back(armor);
+    }
+    found = !expected_armors.empty() && set_target(expected_armors, t);
   }
 
   else {
     found = update_target(armors, t);
   }
 
-  pre_state_ = state_;
   // 更新状态机
   state_machine(found);
 
@@ -171,6 +199,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     return {switch_target, {}};  // 返回switch_target和空的targets
   }
 
+  if (state_ != "lost" && state_ != "switching" && target_.bad_quality()) state_ = "lost";
   if (state_ == "lost") return {switch_target, {}};  // 返回switch_target和空的targets
 
   std::list<Target> targets = {target_};
@@ -182,8 +211,9 @@ void Tracker::state_machine(bool found)
   if (state_ == "lost") {
     if (!found) return;
 
-    state_ = "detecting";
     detect_count_ = 1;
+    temp_lost_count_ = 0;
+    state_ = detect_count_ >= min_detect_count_ ? "tracking" : "detecting";
   }
 
   else if (state_ == "detecting") {
@@ -205,7 +235,9 @@ void Tracker::state_machine(bool found)
 
   else if (state_ == "switching") {
     if (found) {
-      state_ = "detecting";
+      detect_count_ = 1;
+      temp_lost_count_ = 0;
+      state_ = detect_count_ >= min_detect_count_ ? "tracking" : "detecting";
     } else {
       temp_lost_count_++;
       if (temp_lost_count_ > 200) state_ = "lost";
@@ -215,6 +247,7 @@ void Tracker::state_machine(bool found)
   else if (state_ == "temp_lost") {
     if (found) {
       state_ = "tracking";
+      temp_lost_count_ = 0;
     } else {
       temp_lost_count_++;
       if (target_.name == ArmorName::outpost)
@@ -230,28 +263,18 @@ void Tracker::state_machine(bool found)
 
 bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::time_point t)
 {
-  solver_.solve(armors);
   for (auto & armor : armors) {
     if (armor.name == ArmorName::not_armor) continue;
 
-    // 根据兵种优化初始化参数
-    auto is_balance = (armor.type == ArmorType::big) &&
-                      (armor.name == ArmorName::three || armor.name == ArmorName::four ||
-                       armor.name == ArmorName::five);
-
-    if (is_balance) {
-      Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1, 0}};
-      target_ = Target(armor, t, 0.2, 2, P0_dig);
-    }
-
-    else if (armor.name == ArmorName::outpost) {
+    // 实际车型仅有普通四板和前哨站三板，与单帧可见板数无关。
+    if (armor.name == ArmorName::outpost) {
       Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 1, 1}};
       target_ = Target(armor, t, 0.2765, 3, P0_dig);
     }
 
     else if (armor.name == ArmorName::base) {
       Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0, 0}};
-      target_ = Target(armor, t, 0.3205, 3, P0_dig);
+      target_ = Target(armor, t, 0.3205, 4, P0_dig);
     }
 
     else {
@@ -269,30 +292,15 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 {
   target_.predict(t);
 
-  int found_count = 0;
-  double min_x = 1e10;  // 画面最左侧
+  std::list<Armor> aim_armors;
   for (const auto & armor : armors) {
-    if (armor.name != target_.name || armor.type != target_.armor_type) continue;
-    found_count++;
-    min_x = armor.center.x < min_x ? armor.center.x : min_x;
+    if (armor.name == target_.name && armor.type == target_.armor_type) aim_armors.push_back(armor);
   }
-
-  if (found_count == 0) return false;
-
-  solver_.solve(armors);
-  for (auto & armor : armors) {
-    if (
-      armor.name != target_.name || armor.type != target_.armor_type
-      //  || armor.center.x != min_x
-    )
-      continue;
-
-    if (armor.name == ArmorName::not_armor) continue;
-
-    target_.update(armor);
-  }
-
-  return true;
+  // 接受关联并完成融合才算 found；异常观测不推动 detecting/tracking 状态。
+  if (aim_armors.empty()) return false;
+  if (aim_armors.size() > 2)
+    tools::logger()->warn("[Tracker] More than 2 candidates, selecting a valid pair or single armor");
+  return target_.update_armors(aim_armors);
 }
 
 }  // namespace auto_aim

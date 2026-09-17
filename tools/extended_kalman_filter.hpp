@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <map>
 
 namespace tools
@@ -39,17 +40,20 @@ public:
       [](const Eigen::VectorXd & a, const Eigen::VectorXd & b) { return a - b; });
 
   std::map<std::string, double> data;  //卡方检验数据
-  std::deque<int> recent_nis_failures{0};
+  // 默认不改变其他模块的更新策略；自瞄 Target 显式启用创新门限。
+  double nis_gate_probability = 0.0;
+  bool last_update_accepted = false;
+  static double nis_threshold(int dimension, double probability = 0.95);
+  static double innovation_nis(
+    const Eigen::VectorXd & residual, const Eigen::MatrixXd & H, const Eigen::MatrixXd & P,
+    const Eigen::MatrixXd & R);
+  std::deque<int> recent_nis_failures;
   size_t window_size = 100;
-  double last_nis;
+  double last_nis = 0.0;
 
 private:
   Eigen::MatrixXd I;
   std::function<Eigen::VectorXd(const Eigen::VectorXd &, const Eigen::VectorXd &)> x_add;
-
-  int nees_count_ = 0;
-  int nis_count_ = 0;
-  int total_count_ = 0;
 };
 
 }  // namespace tools

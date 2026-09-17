@@ -1,5 +1,7 @@
 #include "planner.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -25,37 +27,72 @@ Planner::Planner(const std::string & config_path)
   high_speed_delay_time_ = tools::read<double>(yaml, "high_speed_delay_time");
   low_speed_delay_time_ = tools::read<double>(yaml, "low_speed_delay_time");
 
+  // 选板速度阈值（滞回），与延迟补偿的 decision_speed_ 解耦
+  low_speed_thresh_ = tools::read<double>(yaml, "low_speed_thresh");
+  high_speed_thresh_ = tools::read<double>(yaml, "high_speed_thresh");
+  if (low_speed_thresh_ > high_speed_thresh_) std::swap(low_speed_thresh_, high_speed_thresh_);
+  min_lock_hold_time_ = std::max(0.0, tools::read<double>(yaml, "min_lock_hold_time"));
+  switch_margin_ = tools::read<double>(yaml, "switch_margin") / 57.3;
+
   setup_yaw_solver(config_path);
   setup_pitch_solver(config_path);
 }
 
 Plan Planner::plan(Target target, double bullet_speed)
 {
+  const auto command_time = std::chrono::steady_clock::now();
+
   // 0. Check bullet speed
   if (bullet_speed < 10 || bullet_speed > 25) {
     bullet_speed = 22;
   }
 
+  // 选板速度模式滞回：避免角速度在阈值附近反复切换
+  const double w = std::abs(target.ekf_x()[7]);
+  if (high_speed_mode_) {
+    if (w < low_speed_thresh_) high_speed_mode_ = false;
+  } else {
+    if (w > high_speed_thresh_) high_speed_mode_ = true;
+  }
+
   // 1. Predict fly_time
-  auto aim_point = choose_aim_point(target);
-  debug_aim_point_id_ = aim_point.id;
-  if (!aim_point.valid) return {false};
-  auto xyza = aim_point.xyza;
-  auto xyz = xyza.head<3>();
-  auto aim_dist = xyza.head<2>().norm();
-  auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z(), air_resistance_);
+  Eigen::Vector3d xyz;
+  auto min_dist = 1e10;
+  for (auto & xyza : target.armor_xyza_list()) {
+    auto dist = xyza.head<2>().norm();
+    if (dist < min_dist) {
+      min_dist = dist;
+      xyz = xyza.head<3>();
+    }
+  }
+  auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z(), air_resistance_);
   target.predict(bullet_traj.fly_time); // 预测飞行时间
 
   // 2. Get trajectory
+  BoardSelectState st;
+  st.lock_id = target.jumped ? lock_id_ : -1;  // 重建/新目标不继承旧板号
+  st.lock_since = lock_since_;
+
+  PlannerAimPoint commit_point;
   double yaw0;
   Trajectory traj;
   try { // 生成参考轨迹
-    yaw0 = aim(target, bullet_speed)(0);
-    traj = get_trajectory(target, yaw0, bullet_speed);
+    const auto command = aim(target, bullet_speed, st, command_time);
+    commit_point = command.point;
+    yaw0 = command.yaw_pitch(0);
+    traj = get_trajectory(target, yaw0, bullet_speed, st, command, command_time);
   } catch (const std::exception & e) {
     tools::logger()->warn("Unsolvable target {:.2f}", bullet_speed);
+    lock_id_ = -1;  // 目标丢失重置锁板
+    lock_since_ = {};
     return {false};
   }
+
+  // 只有命令时刻（t=0）的选板结果才提交到成员
+  lock_since_ = st.lock_since;
+  lock_id_ = commit_point.id;
+  debug_aim_point_id_ = commit_point.id;
+  debug_xyza = commit_point.xyza;
 
   // 3. Solve yaw
   Eigen::VectorXd x0(2);
@@ -89,6 +126,7 @@ Plan Planner::plan(Target target, double bullet_speed)
 
   auto shoot_offset_ = 2;
   plan.fire =
+    commit_point.can_fire && commit_point.id >= 0 &&
     std::hypot(
       traj(0, HALF_HORIZON + shoot_offset_) - yaw_solver_->work->x(0, HALF_HORIZON + shoot_offset_),
       traj(2, HALF_HORIZON + shoot_offset_) -
@@ -98,7 +136,11 @@ Plan Planner::plan(Target target, double bullet_speed)
 
 Plan Planner::plan(std::optional<Target> target, double bullet_speed)
 {
-  if (!target.has_value()) return {false};
+  if (!target.has_value()) {
+    lock_id_ = -1;
+    lock_since_ = {};
+    return {false};
+  }
 
   double delay_time =
     std::abs(target->ekf_x()[7]) > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
@@ -156,127 +198,138 @@ void Planner::setup_pitch_solver(const std::string & config_path)
   pitch_solver_->settings->max_iter = 10;
 }
 
-Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_speed)
+Planner::AimResult Planner::aim(
+  const Target & target, double bullet_speed, BoardSelectState & st,
+  std::chrono::steady_clock::time_point time)
 {
-  auto aim_point = choose_aim_point(target);
+  auto aim_point = choose_aim_point(target, st, high_speed_mode_, time);
   if (!aim_point.valid) throw std::runtime_error("Invalid aim point!");
 
   auto xyza = aim_point.xyza;
   auto xyz = xyza.head<3>();
-  auto yaw = xyza[3];
   auto aim_dist = xyza.head<2>().norm();
-  debug_xyza = Eigen::Vector4d(xyz.x(), xyz.y(), xyz.z(), yaw);
-  debug_aim_point_id_ = aim_point.id;
 
   auto azim = std::atan2(xyz.y(), xyz.x());
   auto bullet_traj = tools::Trajectory(bullet_speed, aim_dist, xyz.z(), air_resistance_);
   if (bullet_traj.unsolvable) throw std::runtime_error("Unsolvable bullet trajectory!");
 
-  return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};
+  // 世界系方位角从 +X 起算，云台零方向为 +Y，发送角需减去 90°
+  return {
+    {tools::limit_rad(azim - M_PI / 2 + yaw_offset_), bullet_traj.pitch + pitch_offset_}, aim_point};
 }
 
-PlannerAimPoint Planner::choose_aim_point(const Target & target)
+PlannerAimPoint Planner::choose_aim_point(
+  const Target & target, BoardSelectState & st, bool high_speed_mode,
+  std::chrono::steady_clock::time_point time)
 {
-  Eigen::VectorXd ekf_x = target.ekf_x();
-  std::vector<Eigen::Vector4d> armor_xyza_list = target.armor_xyza_list();
-  auto armor_num = armor_xyza_list.size();
-  if (!target.jumped) return {true, 0, armor_xyza_list[0]};
+  const Eigen::VectorXd & ekf_x = target.ekf_x();
+  const auto armor_xyza_list = target.armor_xyza_list();
+  const int armor_num = static_cast<int>(armor_xyza_list.size());
 
-  auto center_yaw = std::atan2(ekf_x[2], ekf_x[0]);
+  if (armor_num == 0) return {false, false, -1, {0, 0, 0, 0}};
 
-  std::vector<double> delta_angle_list;
-  for (int i = 0; i < static_cast<int>(armor_num); i++) {
-    auto delta_angle = tools::limit_rad(armor_xyza_list[i][3] - center_yaw);
-    delta_angle_list.emplace_back(delta_angle);
+  const double center_yaw = std::atan2(ekf_x[2], ekf_x[0]);
+
+  std::vector<double> delta_list;
+  delta_list.reserve(armor_num);
+  for (const auto & xyza : armor_xyza_list)
+    delta_list.emplace_back(tools::limit_rad(xyza[3] - center_yaw));
+
+  const bool outpost = target.name == ArmorName::outpost;
+  const double coming = outpost ? 90.0 / 57.3 : comming_angle_;
+  const double leaving = outpost ? 60.0 / 57.3 : leaving_angle_;
+
+  // 射击窗口：命中时刻朝向需在进入/离开角之间；与跟踪候选分离
+  auto in_fire_window = [&](int id) {
+    const double delta = delta_list[id];
+    if (outpost || high_speed_mode) {
+      // 正转由负角进入，越过正 leaving 后离开；反转取镜像窗口。
+      if (std::abs(delta) > coming) return false;
+      if (ekf_x[7] > 0) return delta < leaving;
+      if (ekf_x[7] < 0) return delta > -leaving;
+      return false;
+    }
+    return std::abs(delta) <= 60.0 / 57.3;
+  };
+
+  // 初始化阶段：跟踪固定 0 号板（优先观测板），但开火仍按窗口判断
+  if (!target.jumped) {
+    if (st.lock_id != 0) st.lock_since = time;
+    st.lock_id = 0;
+    return {true, in_fire_window(0), 0, armor_xyza_list[0]};
   }
 
-  if (std::abs(target.ekf_x()[7]) <= 1 && target.name != ArmorName::outpost) {
-    std::vector<int> id_list;
-    for (int i = 0; i < static_cast<int>(armor_num); i++) {
-      if (std::abs(delta_angle_list[i]) > 60 / 57.3) continue;
-      id_list.push_back(i);
-    }
-
-    if (id_list.empty()) {
-      tools::logger()->warn("Empty id list!");
-      return {false, -1, armor_xyza_list[0]};
-    }
-
-    if (id_list.size() > 1) {
-      int id0 = id_list[0], id1 = id_list[1];
-
-      if (lock_id_ != id0 && lock_id_ != id1)
-        lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
-      return {true, lock_id_, armor_xyza_list[lock_id_]};
-    }
-
-    lock_id_ = -1;
-    return {true, id_list[0], armor_xyza_list[id_list[0]]};
-  }else if (abs(target.ekf_x()[7]) >= 1 && target.name != ArmorName::outpost) {
-    std::vector<int> id_list;
-    for (int i = 0; i < static_cast<int>(armor_num); i++) {
-      if (std::abs(delta_angle_list[i]) > 60 / 57.3) continue;
-      id_list.push_back(i);
-    }
-
-    if (id_list.empty()) {
-      tools::logger()->warn("Empty id list!");
-      return {false, -1, armor_xyza_list[0]};
-    }
-
-    if (id_list.size() > 1) {
-      int id0 = id_list[0], id1 = id_list[1];
-
-      // if (lock_id_ != id0 && lock_id_ != id1)
-        lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
-      return {true, lock_id_, armor_xyza_list[lock_id_]};
-    }
-
-    // lock_id_ = -1;
-    return {true, id_list[0], armor_xyza_list[id_list[0]]};
+  // 跟踪候选：|delta| <= 跟踪窗口，射击窗口之外的板也纳入，保证轨迹连续
+  const double track_window = outpost ? coming : 60.0 / 57.3;
+  std::vector<int> id_list;
+  for (int i = 0; i < armor_num; i++) {
+    if (std::abs(delta_list[i]) <= track_window) id_list.push_back(i);
   }
 
-  double coming_angle, leaving_angle;
-  if (target.name == ArmorName::outpost) {
-    coming_angle = 90 / 57.3;
-    leaving_angle = 60 / 57.3;
-  } else {
-    coming_angle = comming_angle_;
-    leaving_angle = leaving_angle_;
+  if (id_list.empty()) {
+    // 无候选：改用旋转中心连续跟踪，只关开火，不退出控制
+    tools::logger()->warn("No trackable board!");
+    st.lock_id = -1;
+    st.lock_since = time;
+    return {true, false, -1, {ekf_x[0], ekf_x[2], ekf_x[4], center_yaw}};
   }
 
-  for (int i = 0; i < static_cast<int>(armor_num); i++) {
-    if (std::abs(delta_angle_list[i]) > coming_angle) continue;
-    if (ekf_x[7] > 0 && delta_angle_list[i] < leaving_angle) return {true, i, armor_xyza_list[i]};
-    if (ekf_x[7] < 0 && delta_angle_list[i] > -leaving_angle) return {true, i, armor_xyza_list[i]};
+  // 锁板：新板明显更优 + 最短保持时间才切换；始终记录实际选中 ID
+  int best = *std::min_element(
+    id_list.begin(), id_list.end(),
+    [&](int a, int b) { return std::abs(delta_list[a]) < std::abs(delta_list[b]); });
+
+  bool in_candidates =
+    std::find(id_list.begin(), id_list.end(), st.lock_id) != id_list.end(); // 当前锁板仍在候选中
+  bool should_switch = !in_candidates;  // 单候选时也走这里，锁定实际板且不清 -1
+  if (!should_switch && best != st.lock_id) {
+    should_switch = std::abs(delta_list[best]) + switch_margin_ < std::abs(delta_list[st.lock_id]) &&
+                    std::chrono::duration<double>(time - st.lock_since).count() >= min_lock_hold_time_;
   }
 
-  return {false, -1, armor_xyza_list[0]};
+  if (should_switch) {
+    st.lock_id = best;
+    st.lock_since = time;
+  }
+
+  return {true, in_fire_window(st.lock_id), st.lock_id, armor_xyza_list[st.lock_id]};
 }
 
-Trajectory Planner::get_trajectory(Target & target, double yaw0, double bullet_speed)
+Trajectory Planner::get_trajectory(
+  Target target, double yaw0, double bullet_speed, const BoardSelectState & command_state,
+  const AimResult & command, std::chrono::steady_clock::time_point time)
 {
   Trajectory traj;
-
+  std::array<AimResult, HORIZON + 2> samples;
+  auto sample_state = command_state;
   target.predict(-DT * (HALF_HORIZON + 1));
-  auto yaw_pitch_last = aim(target, bullet_speed);
 
-  target.predict(DT);  // [0] = -HALF_HORIZON * DT -> [HHALF_HORIZON] = 0
-  auto yaw_pitch = aim(target, bullet_speed);
-
-  for (int i = 0; i < HORIZON; i++) {
+  for (int i = 0; i < HORIZON + 2; ++i) {
+    const int offset = i - HALF_HORIZON - 1;
+    if (offset == 0) {
+      // 历史采样不能改写当前决策；未来预测从真实命令状态开始。
+      samples[i] = command;
+      sample_state = command_state;
+    } else {
+      const auto sample_time = time + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(offset * DT));
+      samples[i] = aim(target, bullet_speed, sample_state, sample_time);
+    }
     target.predict(DT);
-    auto yaw_pitch_next = aim(target, bullet_speed);
-
-    auto yaw_vel = tools::limit_rad(yaw_pitch_next(0) - yaw_pitch_last(0)) / (2 * DT);
-    auto pitch_vel = (yaw_pitch_next(1) - yaw_pitch_last(1)) / (2 * DT);
-
-    traj.col(i) << tools::limit_rad(yaw_pitch(0) - yaw0), yaw_vel, yaw_pitch(1), pitch_vel;
-
-    yaw_pitch_last = yaw_pitch;
-    yaw_pitch = yaw_pitch_next;
   }
 
+  for (int i = 0; i < HORIZON; ++i) { // 采样点 i 对应 traj 的第 i 列
+    const auto & last = samples[i];
+    const auto & cur = samples[i + 1];
+    const auto & next = samples[i + 2];
+    const bool same_board = next.point.id >= 0 && next.point.id == cur.point.id &&
+                            cur.point.id == last.point.id;
+    const double yaw_vel = same_board
+      ? tools::limit_rad(next.yaw_pitch(0) - last.yaw_pitch(0)) / (2 * DT) : 0.0;
+    const double pitch_vel = same_board
+      ? (next.yaw_pitch(1) - last.yaw_pitch(1)) / (2 * DT) : 0.0;
+    traj.col(i) << tools::limit_rad(cur.yaw_pitch(0) - yaw0), yaw_vel, cur.yaw_pitch(1), pitch_vel;
+  }
   return traj;
 }
 

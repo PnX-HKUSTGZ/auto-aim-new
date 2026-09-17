@@ -39,9 +39,11 @@ RuneCamera::RuneCamera(const std::string & config_path)
 
 void RuneCamera::set_gimbal_orientation(const Eigen::Quaterniond & orientation)
 {
-  const Eigen::Matrix3d R_imubody2imuabs = orientation.toRotationMatrix();
+  // 与自瞄一致：orientation 是电控给出的“初始姿态到当前姿态”旋转，换基到云台系即可。
+  const Eigen::Matrix3d R_initial2current =
+    orientation.normalized().toRotationMatrix();
   R_gimbal2world_ =
-    R_gimbal2imubody_.transpose() * R_imubody2imuabs * R_gimbal2imubody_;
+    R_gimbal2imubody_.transpose() * R_initial2current * R_gimbal2imubody_;
 }
 
 const Eigen::Matrix3d & RuneCamera::R_gimbal2world() const

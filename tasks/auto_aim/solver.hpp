@@ -43,12 +43,9 @@ private:
   Eigen::Matrix3d R_gimbal2imubody_;
   Eigen::Matrix3d R_camera2gimbal_;
   Eigen::Vector3d t_camera2gimbal_;
-  Eigen::Matrix3d R_gimbal2camera_;
   Eigen::Matrix3d R_gimbal2world_;
   std::unique_ptr<BaSolver> ba_solver_;
-  bool use_pnp_yaw_range_ = false;
-  double pnp_yaw_min_ = -CV_PI;
-  double pnp_yaw_max_ = CV_PI;
+  double pnp_max_incidence_ = 80.0 * CV_PI / 180.0;
 
   void solve(Armor & armor, const std::vector<cv::Point2f> & image_points) const;
 

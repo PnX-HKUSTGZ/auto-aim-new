@@ -139,7 +139,7 @@ constexpr double SMALL_ARMOR_WIDTH  = 0.135;
 constexpr double SMALL_ARMOR_HEIGHT = 0.056;
 constexpr double LARGE_ARMOR_WIDTH  = 0.230;
 constexpr double LARGE_ARMOR_HEIGHT = 0.056;
-constexpr double FIFTEEN_DEGREE_RAD = 15.0 * M_PI / 180.0;
+constexpr double ARMOR_PITCH_RAD = 22.5 * M_PI / 180.0;
 
 }  // namespace auto_aim
 

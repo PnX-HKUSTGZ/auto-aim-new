@@ -39,7 +39,7 @@ io::Command Aimer::aim(
     if (decision.state == RuneDecisionState::Recovering)
       apply_recovery(*decision.target, decision.recovery_ratio, yaw, pitch);
     command.yaw = yaw;
-    command.pitch = -pitch;  //世界坐标系下的pitch向上为负
+    command.pitch = pitch;  //世界坐标系下的pitch向上为负
     if (mistake_count_ > 3) {
       switch_fanblade_ = true;
       mistake_count_ = 0;
@@ -96,7 +96,7 @@ auto_aim::Plan Aimer::mpc_aim(
     if (decision.state == RuneDecisionState::Recovering)
       apply_recovery(*decision.target, decision.recovery_ratio, yaw, pitch);
     plan.yaw = yaw;
-    plan.pitch = -pitch;  //世界坐标系下的pitch向上为负
+    plan.pitch = pitch;  //世界坐标系下的pitch向上为负
     if (mistake_count_ > 3) {
       switch_fanblade_ = true;
       mistake_count_ = 0;
@@ -146,9 +146,9 @@ auto_aim::Plan Aimer::mpc_aim(
           plan.yaw_acc =
             tools::limit_rad(yaw_after - 2.0 * yaw + yaw_before) / (dt * dt);
 
-          const double pitch_command = -pitch;
-          const double pitch_before_command = -pitch_before;
-          const double pitch_after_command = -pitch_after;
+          const double pitch_command = pitch;
+          const double pitch_before_command = pitch_before;
+          const double pitch_after_command = pitch_after;
           plan.pitch_vel =
             tools::limit_rad(pitch_after_command - pitch_before_command) / (2.0 * dt);
           plan.pitch_acc =
@@ -219,7 +219,9 @@ bool Aimer::get_send_angle(
     }
 
     if (position_error < kPositionConvergenceThreshold) {
-      yaw = std::atan2(aim_in_world.y(), aim_in_world.x()) + yaw_offset_;
+      // 世界系方位角从 +X 起算，云台零方向为 +Y，发送角需减去 90°
+      yaw = tools::limit_rad(
+        std::atan2(aim_in_world.y(), aim_in_world.x()) - M_PI / 2 + yaw_offset_);
       pitch = trajectory.pitch + pitch_offset_;
       return true;
     }
@@ -232,8 +234,9 @@ bool Aimer::get_send_angle(
 void Aimer::apply_recovery(
   const RuneTarget & target, double recovery_ratio, double & yaw, double & pitch) const
 {
-  const double center_yaw =
-    std::atan2(target.rune_center.y(), target.rune_center.x()) + yaw_offset_;
+  // 与 get_send_angle 一致：云台零方向为 +Y，发送角需减去 90°
+  const double center_yaw = tools::limit_rad(
+    std::atan2(target.rune_center.y(), target.rune_center.x()) - M_PI / 2 + yaw_offset_);
   const double center_pitch =
     std::atan2(
       target.rune_center.z(),

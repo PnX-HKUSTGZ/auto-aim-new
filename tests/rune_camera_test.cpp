@@ -47,13 +47,13 @@ int main(int argc, char * argv[])
     const auto_buff::CameraPose pose = camera.pose();
     require(
       (camera.R_gimbal2world() - expected_gimbal_to_world).norm() < 1e-12,
-      "Gimbal-to-world rotation changed during migration");
+      "Gimbal rotation must use the calibrated IMU reference frame");
     require(
       (pose.R_world_camera - expected_gimbal_to_world * camera_to_gimbal).norm() < 1e-12,
-      "Camera-to-world rotation changed during migration");
+      "Camera rotation must use the calibrated IMU reference frame");
     require(
       (pose.t_world_camera - expected_gimbal_to_world * camera_translation).norm() < 1e-12,
-      "Camera position changed during migration");
+      "Camera position must use the calibrated IMU reference frame");
 
     const Eigen::Vector3d optical_axis_point =
       pose.t_world_camera + pose.R_world_camera * Eigen::Vector3d(0.0, 0.0, 2.0);
@@ -69,6 +69,22 @@ int main(int argc, char * argv[])
     require(
       !camera.project_world_point(point_behind_camera, pose),
       "Point behind camera must not be projected");
+
+    // 固定世界点在不同云台姿态下应恢复为同一坐标，不能随云台旋转。
+    const Eigen::Vector3d fixed_world_point(2.0, -0.7, 0.4);
+    for (double yaw : {0.0, 0.5, -0.8}) {
+      const Eigen::Quaterniond initial_to_imu(
+        Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+        Eigen::AngleAxisd(0.2, Eigen::Vector3d::UnitX()));
+      camera.set_gimbal_orientation(initial_to_imu);
+      // q 是“初始姿态到当前姿态”的旋转，当前 IMU 坐标 = R(q)^T * A * p_world。
+      const Eigen::Vector3d point_in_imu =
+        initial_to_imu.conjugate() * (gimbal_to_imu * fixed_world_point);
+      const Eigen::Vector3d point_in_gimbal = gimbal_to_imu.transpose() * point_in_imu;
+      require(
+        (camera.R_gimbal2world() * point_in_gimbal - fixed_world_point).norm() < 1e-12,
+        "A fixed world point must remain stationary as the gimbal rotates");
+    }
 
     std::cout << "rune camera pose and projection checks passed\n";
     return 0;

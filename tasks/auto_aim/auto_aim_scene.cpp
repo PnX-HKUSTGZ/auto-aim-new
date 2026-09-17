@@ -5,7 +5,9 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
 
 namespace auto_aim
@@ -54,11 +56,12 @@ Json pose(
       {"w", orientation.w()}}}};
 }
 
-Json entity(const std::string & id, const Json & timestamp)
+Json entity(
+  const std::string & id, const Json & timestamp, const std::string & frame_id = "world")
 {
   Json result = {
     {"id", id},
-    {"frame_id", "world"},
+    {"frame_id", frame_id},
     {"timestamp", timestamp},
     {"lifetime", {{"sec", 0}, {"nsec", 0}}},
     {"frame_locked", false}};
@@ -177,16 +180,30 @@ void add_attitude(Json & scene, const Eigen::Quaterniond & attitude, const Json 
 {
   if (!attitude.coeffs().allFinite() || attitude.norm() <= kMinValue) return;
   const Eigen::Quaterniond normalized = attitude.normalized();
-  auto gimbal = entity("gimbal_attitude", timestamp);
-  arrow(gimbal, Vec::Zero(), normalized * Vec::UnitX(), 0.35, color(1.0, 0.1, 0.1));
-  arrow(gimbal, Vec::Zero(), normalized * Vec::UnitY(), 0.35, color(0.1, 1.0, 0.2));
-  arrow(gimbal, Vec::Zero(), normalized * Vec::UnitZ(), 0.35, color(0.1, 0.5, 1.0));
-  label(gimbal, normalized * Vec(0.0, 0.0, 0.42), "gimbal attitude", color(1, 1, 1));
+  // 图元使用 gimbal 局部坐标，由 world -> gimbal 的 FrameTransform 驱动。
+  // frame_locked 确保 Foxglove 使用最新变换，而不是锁定在实体消息的采样姿态。
+  auto gimbal = entity("gimbal_attitude", timestamp, "gimbal");
+  gimbal["frame_locked"] = true;
+  arrow(gimbal, Vec::Zero(), Vec::UnitX(), 0.35, color(1.0, 0.1, 0.1));
+  arrow(gimbal, Vec::Zero(), Vec::UnitY(), 0.35, color(0.1, 1.0, 0.2));
+  arrow(gimbal, Vec::Zero(), Vec::UnitZ(), 0.35, color(0.1, 0.5, 1.0));
+  label(gimbal, Vec(0.0, 0.0, 0.42), "gimbal attitude", color(1, 1, 1));
   gimbal["metadata"] = Json::array({
     {{"key", "quaternion_xyzw"},
      {"value",
       Json::array({normalized.x(), normalized.y(), normalized.z(), normalized.w()}).dump()}}});
   scene["entities"].push_back(std::move(gimbal));
+}
+
+void add_camera_axes(Json & scene, const Json & timestamp)
+{
+  auto camera = entity("camera_frame", timestamp, "camera");
+  camera["frame_locked"] = true;
+  arrow(camera, Vec::Zero(), Vec::UnitX(), 0.25, color(1.0, 0.1, 0.1));
+  arrow(camera, Vec::Zero(), Vec::UnitY(), 0.25, color(0.1, 1.0, 0.2));
+  arrow(camera, Vec::Zero(), Vec::UnitZ(), 0.35, color(0.1, 0.5, 1.0));
+  label(camera, Vec(0.0, 0.0, 0.42), "camera: X right / Y down / Z forward", color(1, 1, 1));
+  scene["entities"].push_back(std::move(camera));
 }
 
 void add_ballistic_trajectory(
@@ -246,6 +263,11 @@ AutoAimVisualizer::AutoAimVisualizer(const std::string & config_path)
 {
   const auto yaml = tools::load(config_path);
   air_resistance_ = tools::read<double>(yaml, "air_resistance");
+  const auto rotation = tools::read<std::vector<double>>(yaml, "R_camera2gimbal");
+  const auto translation = tools::read<std::vector<double>>(yaml, "t_camera2gimbal");
+  R_camera2gimbal_ =
+    Eigen::Matrix<double, 3, 3, Eigen::RowMajor>(rotation.data());
+  t_camera2gimbal_ = Eigen::Map<const Eigen::Vector3d>(translation.data());
 }
 
 AutoAimVisualizer::AutoAimVisualizer(double air_resistance) : air_resistance_(air_resistance) {}
@@ -270,9 +292,26 @@ Json AutoAimVisualizer::make_gimbal_transform(
       {"w", orientation.w()}}}};
 }
 
+Json AutoAimVisualizer::make_camera_transform(std::uint64_t timestamp_ns) const
+{
+  const Eigen::Quaterniond orientation(R_camera2gimbal_);
+  return {
+    {"timestamp",
+     {{"sec", timestamp_ns / 1000000000ULL}, {"nsec", timestamp_ns % 1000000000ULL}}},
+    {"parent_frame_id", "gimbal"},
+    {"child_frame_id", "camera"},
+    {"translation", xyz(t_camera2gimbal_)},
+    {"rotation",
+     {{"x", orientation.x()},
+      {"y", orientation.y()},
+      {"z", orientation.z()},
+      {"w", orientation.w()}}}};
+}
+
 Json AutoAimVisualizer::make_scene(
   const std::list<Target> & targets, double bullet_speed, double yaw, double pitch,
-  const Eigen::Quaterniond & attitude, std::uint64_t timestamp_ns) const
+  const Eigen::Quaterniond & attitude, std::uint64_t timestamp_ns,
+  const std::list<Armor> & observed_armors) const
 {
   const Json timestamp = {
     {"sec", timestamp_ns / 1000000000ULL}, {"nsec", timestamp_ns % 1000000000ULL}};
@@ -284,9 +323,39 @@ Json AutoAimVisualizer::make_scene(
   arrow(axes, Vec::Zero(), Vec::UnitX(), 0.5, color(1.0, 0.1, 0.1));
   arrow(axes, Vec::Zero(), Vec::UnitY(), 0.5, color(0.1, 1.0, 0.2));
   arrow(axes, Vec::Zero(), Vec::UnitZ(), 0.5, color(0.1, 0.5, 1.0));
-  label(axes, Vec(0.0, 0.0, 0.6), "world: X forward / Y left / Z up", color(1, 1, 1));
+  label(axes, Vec(0.0, 0.0, 0.6), "world: calibrated heading / Z up", color(1, 1, 1));
   scene["entities"].push_back(std::move(axes));
   add_attitude(scene, attitude, timestamp);
+  add_camera_axes(scene, timestamp);
+
+  std::size_t observation_index = 0;
+  for (const Armor & armor : observed_armors) {
+    if (armor.name == ArmorName::not_armor || !armor.xyz_in_world.allFinite() ||
+        !armor.ypr_in_world.allFinite()) continue;
+    auto observation = entity("observed_armor_" + std::to_string(observation_index++), timestamp);
+    const Eigen::Quaterniond rotation =
+      Eigen::AngleAxisd(armor.ypr_in_world[0], Vec::UnitZ()) *
+      Eigen::AngleAxisd(armor.ypr_in_world[1], Vec::UnitY()) *
+      Eigen::AngleAxisd(armor.ypr_in_world[2], Vec::UnitX());
+    const double width =
+      armor.type == ArmorType::big ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
+    const double height =
+      armor.type == ArmorType::big ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
+    const Json observation_color = color(0.0, 0.9, 1.0, 0.65);
+    observation["cubes"].push_back({
+      {"pose", pose(armor.xyz_in_world, rotation)},
+      {"size", xyz(Vec(0.018, width, height))},
+      {"color", observation_color}});
+    arrow(observation, armor.xyz_in_world, rotation * Vec::UnitX(), 0.15, observation_color);
+    label(
+      observation, armor.xyz_in_world + Vec(0.0, 0.0, 0.10),
+      "observed (world m): " + std::to_string(armor.xyz_in_world.x()) + ", " +
+        std::to_string(armor.xyz_in_world.y()) + ", " + std::to_string(armor.xyz_in_world.z()),
+      observation_color);
+    observation["metadata"] = Json::array({
+      {{"key", "xyz_in_world_m"}, {"value", xyz(armor.xyz_in_world).dump()}}});
+    scene["entities"].push_back(std::move(observation));
+  }
 
   std::size_t target_index = 0;
   for (const Target & tracked : targets) {
@@ -331,7 +400,9 @@ Json AutoAimVisualizer::make_scene(
         tracked.armor_type == ArmorType::big ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
       const double height =
         tracked.armor_type == ArmorType::big ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
-      const bool matched = static_cast<int>(armor_index) == tracked.last_id;
+      const bool matched = std::find(
+        tracked.last_id.begin(), tracked.last_id.end(), static_cast<int>(armor_index)) !=
+        tracked.last_id.end();
       const Json armor_color =
         matched ? color(0.1, 1.0, 0.25, 0.9) : color(1.0, 0.75, 0.1, 0.7);
       target["cubes"].push_back({
@@ -351,11 +422,17 @@ Json AutoAimVisualizer::make_scene(
         {"colors", Json::array()},
         {"indices", Json::array()}});
     }
+    std::string last_ids_str = "[";
+    for (std::size_t i = 0; i < tracked.last_id.size(); ++i) {
+      if (i > 0) last_ids_str += ",";
+      last_ids_str += std::to_string(tracked.last_id[i]);
+    }
+    last_ids_str += "]";
     target["metadata"] = Json::array({
       {{"key", "center_velocity_m_s"}, {"value", xyz(velocity).dump()}},
       {{"key", "angular_velocity_rad_s"}, {"value", std::to_string(state[7])}},
       {{"key", "radius_m"}, {"value", std::to_string(state[8])}},
-      {{"key", "last_armor_id"}, {"value", std::to_string(tracked.last_id)}}});
+      {{"key", "last_armor_id"}, {"value", last_ids_str}}});
     scene["entities"].push_back(std::move(target));
     ++target_index;
   }
@@ -363,11 +440,13 @@ Json AutoAimVisualizer::make_scene(
   if (!std::isfinite(bullet_speed) || bullet_speed <= 0.0) {
     bullet_speed = 22.0;
   }
-  const double horizontal_distance = target_horizontal_distance(targets, yaw);
+  // 命令 yaw 以云台 +Y 为零方向，弹道绘制使用从 +X 起算的数学方位角，需加回 90°
+  const double math_yaw = tools::limit_rad(yaw + kPi / 2);
+  const double horizontal_distance = target_horizontal_distance(targets, math_yaw);
   if (horizontal_distance > 0.0 && std::isfinite(pitch)) {
     // Planner/Gimbal command convention is muzzle-up negative.
     add_ballistic_trajectory(
-      scene, {bullet_speed, yaw, -pitch, horizontal_distance, air_resistance_}, timestamp);
+      scene, {bullet_speed, math_yaw, pitch, horizontal_distance, air_resistance_}, timestamp);
   }
   return scene;
 }

@@ -242,7 +242,7 @@ int main(int argc, char * argv[])
       data["l"] = x[9];
       data["h1"] = x[10];
       data["h2"] = x[11];
-      data["last_id"] = target.last_id;
+      data["last_id"] = target.last_id.empty() ? 0 : target.last_id.back();
 
       // 卡方检验数据
       data["residual_yaw"] = target.ekf().data.at("residual_yaw");
@@ -250,9 +250,11 @@ int main(int argc, char * argv[])
       data["residual_distance"] = target.ekf().data.at("residual_distance");
       data["residual_angle"] = target.ekf().data.at("residual_angle");
       data["nis"] = target.ekf().data.at("nis");
-      data["nees"] = target.ekf().data.at("nees");
+      data["update_accepted"] = target.ekf().data.at("update_accepted");
+      data["measurement_dim"] = target.ekf().data.at("measurement_dim");
+      for (const auto * key : {"residual_yaw_2", "residual_pitch_2", "residual_distance_2", "residual_angle_2"})
+        data[key] = target.ekf().data.at(key);
       data["nis_fail"] = target.ekf().data.at("nis_fail");
-      data["nees_fail"] = target.ekf().data.at("nees_fail");
       data["recent_nis_failures"] = target.ekf().data.at("recent_nis_failures");
     }
 

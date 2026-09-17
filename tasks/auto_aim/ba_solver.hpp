@@ -65,35 +65,42 @@ public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
   using InfoMatrixType = Eigen::Matrix<double, 2, 2>;
 
-  EdgeProjection(const Sophus::SO3d &R_camera_imu, const Sophus::SO3d &R_pitch,
-                 const Eigen::Vector3d &t, const Eigen::Matrix3d &K);
+  EdgeProjection(const Sophus::SO3d &R_world2camera, const Sophus::SO3d &R_pitch,
+                 const Eigen::Vector3d &t, const Eigen::Matrix3d &K,
+                 const Eigen::Matrix<double, 5, 1> &distortion);
   virtual void computeError() override;
 
   virtual bool read(std::istream &in) override { return true; }
   virtual bool write(std::ostream &out) const override { return true; }
 
 private:
-  Sophus::SO3d R_camera_imu_;
+  Sophus::SO3d R_world2camera_;
   Sophus::SO3d R_pitch_;
   Eigen::Vector3d t_;
   Eigen::Matrix3d K_;
+  Eigen::Matrix<double, 5, 1> distortion_;
 };
 
 // BA algorithm based Optimizer for the armor pose estimation (Particularly for
 // the Yaw angle)
 class BaSolver {
 public:
-  BaSolver(std::array<double, 9> &camera_matrix,
-           std::vector<double> &dist_coeffs);
+  BaSolver(const std::array<double, 9> &camera_matrix,
+           const std::vector<double> &dist_coeffs);
 
-  // Solve the armor pose using the BA algorithm, return the optimized rotation
+  // Solve the armor pose using BA. R_armor2camera and t_camera_armor are the
+  // OpenCV PnP result; R_camera2world is the current camera -> world rotation.
+  // The returned rotation is armor -> camera.
   Eigen::Matrix3d solveBa(const Armor &armor,
+                          const std::vector<cv::Point2f> &image_points,
                           const Eigen::Vector3d &t_camera_armor,
-                          const Eigen::Matrix3d &R_camera_armor,
-                          const Eigen::Matrix3d &R_imu_camera) noexcept;
+                          const Eigen::Matrix3d &R_armor2camera,
+                          const Eigen::Matrix3d &R_camera2world,
+                          double initial_armor_yaw) noexcept;
 
 private:
   Eigen::Matrix3d K_;
+  Eigen::Matrix<double, 5, 1> distortion_ = Eigen::Matrix<double, 5, 1>::Zero();
   g2o::SparseOptimizer optimizer_;
   g2o::OptimizationAlgorithmProperty solver_property_;
   g2o::OptimizationAlgorithmLevenberg *lm_algorithm_;

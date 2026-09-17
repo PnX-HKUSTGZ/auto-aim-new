@@ -90,6 +90,9 @@ add_executable(
     tasks/auto_aim/auto_aim_scene.cpp)
 add_executable(auto_buff_test tests/auto_buff_test.cpp)
 add_executable(rune_camera_test tests/rune_camera_test.cpp)
+add_executable(solver_world_test tests/solver_world_test.cpp)
+add_executable(planner_selection_test tests/planner_selection_test.cpp)
+add_executable(tracker_regression_test tests/tracker_regression_test.cpp)
 add_executable(rune_motion_estimator_test tests/rune_motion_estimator_test.cpp)
 add_executable(rune_decision_state_machine_test tests/rune_decision_state_machine_test.cpp)
 add_executable(rune_scene_test tests/rune_scene_test.cpp)
@@ -116,6 +119,9 @@ target_link_libraries(
     buff_visualization ${OpenCV_LIBS} fmt::fmt yaml-cpp nlohmann_json::nlohmann_json tools io auto_aim)
 target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(rune_camera_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+target_link_libraries(solver_world_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+target_link_libraries(planner_selection_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+target_link_libraries(tracker_regression_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 target_link_libraries(rune_motion_estimator_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(
     rune_decision_state_machine_test
