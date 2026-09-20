@@ -51,7 +51,8 @@ Gimbal::Gimbal(const std::string & config_path)
   decision_queue_capacity_ =
     static_cast<std::size_t>(std::max(1, read_or<int>(yaml, "decision_queue_capacity", 16)));
 
-  cmd_vel_linear_scale_ = read_or<double>(yaml, "cmd_vel_linear_scale", 0.4);
+  cmd_vel_linear_scale_ =
+    std::max(0.0, read_or<double>(yaml, "cmd_vel_linear_scale", 1.0));
   follow_mark_default_value_ = static_cast<uint8_t>(std::clamp(
     read_or<int>(yaml, "follow_mark_default_value", 2), 0,
     static_cast<int>(std::numeric_limits<uint8_t>::max())));
@@ -179,8 +180,10 @@ void Gimbal::send_navigation(
 {
   {
     std::lock_guard<std::mutex> lock(tx_mutex_);
-    latest_nav_.linear_x = linear_x;
-    latest_nav_.linear_y = linear_y;
+    // /cmd_vel already carries a chassis-frame ROS twist. Axis/sign conversion
+    // belongs in the navigation frame transform, not in the serial transport.
+    latest_nav_.linear_x = -linear_x;
+    latest_nav_.linear_y = -linear_y;
     latest_nav_.linear_z = linear_z;
     latest_nav_.angular_x = angular_x;
     latest_nav_.angular_y = angular_y;

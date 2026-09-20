@@ -7,6 +7,7 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
+#include "tasks/auto_aim/planner/planner.hpp"
 #include "io/ros2/publish2nav.hpp"
 #include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
@@ -27,7 +28,7 @@ using namespace std::chrono;
 
 const std::string keys =
   "{help h usage ? |                        | 输出命令行参数说明}"
-  "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
+  "{@config-path   | /home/pnx/pnx_autoaim_sp/auto-aim-new/configs/sentry.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
 {
@@ -53,6 +54,7 @@ int main(int argc, char * argv[])
   auto_aim::Solver solver(config_path);
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
+  auto_aim::Planner planner(config_path);
   auto_aim::Shooter shooter(config_path);
 
   omniperception::Decider decider(config_path);
@@ -63,10 +65,15 @@ int main(int argc, char * argv[])
   auto last_reprojection_time = std::chrono::steady_clock::now();
   io::Command last_command;
 
+  tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
+  target_queue.push(std::nullopt);
+
   while (!exiter.exit()) {
     camera.read(img, timestamp);
     Eigen::Quaterniond q = gimbal.q(timestamp - std::chrono::milliseconds(1));
+    auto target = target_queue.front();
     auto gs = gimbal.state();
+    auto now = std::chrono::steady_clock::now();
     // recorder.record(img, q, timestamp);
 
     /// 自瞄核心逻辑
@@ -85,6 +92,10 @@ int main(int argc, char * argv[])
     decider.set_priority(armors);
 
     auto targets = tracker.track(armors, timestamp);
+    if (!targets.empty())
+      target_queue.push(targets.front());
+    else
+      target_queue.push(std::nullopt);
 
     io::Command command{false, false, 0, 0};
 
@@ -94,11 +105,14 @@ int main(int argc, char * argv[])
     // else
     //   command = aimer.aim(targets, timestamp, gs.bullet_speed);
 
-    command = aimer.aim(targets, timestamp, gs.bullet_speed);
+    auto plan = planner.plan(target, gs.bullet_speed);
     /// 发射逻辑
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 
-    gimbal.send(command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
+    // gimbal.send(command.control, command.shoot, command.yaw, 0, 0, command.pitch, 0, 0);
+    gimbal.send(
+        plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
+        plan.pitch_acc);
 
     /// ROS2通信
     Eigen::Vector4d target_info = decider.get_target_info(armors, targets);
@@ -182,8 +196,8 @@ int main(int argc, char * argv[])
     data["gimbal_pitch"] = -gimbal_pos[1] * 57.3;
     data["shootmode"] = static_cast<int>(gimbal.mode());
     if (command.control) {
-      data["cmd_yaw"] = command.yaw * 57.3;
-      data["cmd_pitch"] = command.pitch * 57.3;
+      data["cmd_yaw"] = plan.yaw * 57.3;
+      data["cmd_pitch"] = -plan.pitch * 57.3;
       data["cmd_shoot"] = command.shoot;
     }
 
@@ -192,7 +206,7 @@ int main(int argc, char * argv[])
     plotter.plot(data);
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    auto now = std::chrono::steady_clock::now();
+    // auto now = std::chrono::steady_clock::now();
     auto dt = tools::delta_time(now, last_reprojection_time);
     last_reprojection_time = now;
     tools::draw_text(img, fmt::format("FPS: {:.1f}", 1.0 / dt), {10, 60}, {255, 255, 255});
