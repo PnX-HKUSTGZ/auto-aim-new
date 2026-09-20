@@ -37,6 +37,8 @@ MCU 执行后应回 `DecisionAck`（`/sentry/decision_ack`），由 auto-aim 发
 
 ## 与串口帧的关系
 
+- **当前**串口协议（`GimbalToVision` / `VisionToGimbal` / `NavToGimbalV2` / `DecisionToGimbal`）
+  见 [docs/serial_protocol.md](serial_protocol.md)（此前只存在于代码，现已补文档）。
 - 现有高频控制帧（`VisionToGimbal` / `NavToGimbalV2`）**保持不变**。
 - 新增的裁判/决策帧是低频的、带 `version` 与 `crc16` 的统一帧，仅承载上述消息的数据。
   字节布局与动作集合待与电控/MCU 确认后实现。
