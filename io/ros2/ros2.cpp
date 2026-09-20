@@ -14,10 +14,13 @@ ROS2::ROS2(Gimbal & gimbal) : ROS2()
 {
   subscribe2nav_ = std::make_shared<Subscribe2Nav>(gimbal);
   publish2decision_making_ = std::make_shared<Publish2DecisionMaking>(gimbal);
+  subscribe2decision_ = std::make_shared<Subscribe2Decision>(gimbal);
 
   subscribe_spin_thread_ = std::make_unique<std::thread>([this]() { subscribe2nav_->start(); });
   decision_spin_thread_ =
     std::make_unique<std::thread>([this]() { publish2decision_making_->start(); });
+  decision_command_spin_thread_ =
+    std::make_unique<std::thread>([this]() { subscribe2decision_->start(); });
 }
 
 ROS2::~ROS2()
@@ -27,6 +30,8 @@ ROS2::~ROS2()
   if (publish_spin_thread_ && publish_spin_thread_->joinable()) publish_spin_thread_->join();
   if (subscribe_spin_thread_ && subscribe_spin_thread_->joinable()) subscribe_spin_thread_->join();
   if (decision_spin_thread_ && decision_spin_thread_->joinable()) decision_spin_thread_->join();
+  if (decision_command_spin_thread_ && decision_command_spin_thread_->joinable())
+    decision_command_spin_thread_->join();
 }
 
 void ROS2::publish(const Eigen::Vector4d & target_pos)
