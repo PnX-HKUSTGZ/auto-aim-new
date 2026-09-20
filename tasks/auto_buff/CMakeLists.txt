@@ -5,12 +5,19 @@ find_package(OpenVINO REQUIRED)
 find_package(Ceres REQUIRED)
 
 add_library(auto_buff OBJECT 
-    buff_type.cpp
-    buff_detector.cpp
-    buff_solver.cpp
+    rune_camera.cpp
+    rune_detector.cpp
+    rune_observation.cpp
+    rune_observation_refiner.cpp
+    rune_pose_optimizer.cpp
+    power_rune_plane.cpp
+    small_rune_motion_estimator.cpp
+    big_rune_motion_estimator.cpp
+    phase_motion_estimator.cpp
+    rune_tracker.cpp
+    rune_decision_state_machine.cpp
     buff_aimer.cpp
-    buff_target.cpp
     yolo11_buff.cpp
 )
 
-target_link_libraries(auto_buff auto_aim openvino::runtime ${CERES_LIBRARIES})
+target_link_libraries(auto_buff auto_aim openvino::runtime Ceres::ceres)

@@ -30,6 +30,7 @@ public:
     std::chrono::steady_clock::time_point t, bool use_enemy_color = true);
 
 private:
+  friend struct TrackerRegressionTest;
   Solver & solver_;
   Color enemy_color_;
   int min_detect_count_;
@@ -38,10 +39,14 @@ private:
   int temp_lost_count_;
   int outpost_max_temp_lost_count_;
   int normal_temp_lost_count_;
-  std::string state_, pre_state_;
+  std::string state_;
   Target target_;
   std::chrono::steady_clock::time_point last_timestamp_;
   ArmorPriority omni_target_priority_;
+  ArmorName omni_target_name_ = ArmorName::not_armor;
+  ArmorType omni_target_type_ = ArmorType::small;
+  Color omni_target_color_ = Color::red;
+  bool has_timestamp_ = false;
 
   void state_machine(bool found);
 

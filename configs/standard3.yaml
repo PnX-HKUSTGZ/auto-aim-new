@@ -37,15 +37,19 @@ max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
 
 #####-----aimer参数-----#####
-yaw_offset: -1.3 # degree -2.5   改小偏右
-pitch_offset: 0.6 # degree 2    改小偏下
+yaw_offset: 7.5 # degree -2.5   改小偏右
+pitch_offset: 0.7 # degree 2    改小偏下
 air_resistance: 0.038 # air drag coefficient
 comming_angle: 45 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
-high_speed_delay_time: 0.07 # s
-low_speed_delay_time: 0.01 # s planner use this value
-pnp_yaw_range: [-180, 180] # degree, pnp yaw超出该范围则丢弃装甲板解算结果 36.5
+high_speed_delay_time: 0.0 # s 0.07
+low_speed_delay_time: 0.00 # s planner use this value 0.01
+low_speed_thresh: 1.0 # rad/s 选板低速阈值（滞回退出）
+high_speed_thresh: 2.0 # rad/s 选板高速阈值（滞回进入）
+min_lock_hold_time: 0.15 # s 最短锁板保持时间
+switch_margin: 10 # degree 新板须优于旧板的角度
+pnp_max_incidence: 80 # degree, 装甲板法向与视线的最大水平夹角
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree
@@ -58,31 +62,34 @@ exposure_ms: 2.5
 gain: 16.9
 vid_pid: "2bdf:0001"
 
-#####-----USB相机参数(decider需要)-----#####
-image_width: 1280
-image_height: 720
-fov_h: 57.7
-fov_v: 56.7
-new_fov_h: 27
-new_fov_v: 40.9
+# 电控四元数 q 是“初始姿态到当前姿态”的旋转，R_gimbal2world = A^T * R(q) * A。
+# 换基矩阵(行列式 +1 的合法旋转矩阵):
+#   gimbal X -> IMU -Y
+#   gimbal Y -> IMU  X
+#   gimbal Z -> IMU  Z
+#   A = [ 0, 1, 0;
+#        -1, 0, 0;
+#         0, 0, 1]
+# yaw 绕固定世界 Z、pitch 绕 gimbal 局部 X；若 pitch 方向相反，则换用 A 的转置。
+R_gimbal2imubody: [0, 1, 0, -1, 0, 0, 0, 0, 1]
 
-#####-----decider参数-----#####
-mode: 1
-
-#  0  0  1
-#  -1  0  0
-#  0  -1  0
-R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1] ##云台坐标系到IMU坐标系的旋转矩阵
-
-# 重投影误差: 0.0877px
-camera_matrix: [2334.7739420322241, 0, 725.37873086026468, 0, 2330.777116110125, 572.39934640115098, 0, 0, 1] ##相机内参矩阵
-distort_coeffs: [-0.090952758920105209, 0.41651785949584574, -0.00037695287949318233, -0.0010674450597477521, 0] ##相机畸变参数
+# 重投影误差: 0.0579px
+camera_matrix: [1779.2543398022956, 0, 731.7553028507416, 0, 1777.7463661161173, 563.35056052110451, 0, 0, 1]
+distort_coeffs: [-0.073284760768414711, 0.096314263937776243, -0.00032784130680585112, 0.00020110062749084662, 0]
 
 # 相机同理想情况的偏角: yaw1.44 pitch-7.28 roll0.96 degree   mine: yaw-2.21 pitch-0.87 roll-0.59 degree
 # 标定板到世界坐标系原点的水平距离: 1.13 m
 # 标定板同竖直摆放时的偏角: yaw7.61 pitch13.92 roll-0.46 degree
-R_camera2gimbal: [0.038698437164202293, -0.014841305193736679, 0.99914071412448946, -0.99919860890842604, -0.010807264825764662, 0.038540147670345665, 0.010225992201959848, -0.99983145513988114, -0.015247635762743794] ##相机坐标系到云台坐标系的旋转矩阵
-t_camera2gimbal: [0.10082245525396162, 0.01623367254924455, 0.063979225579786247] ##相机坐标系到云台坐标系的平移向量
+# 外参已由旧 X前/Y左/Z上换基至 X右/Y前/Z上；光轴沿 +Y。
+# R_camera2gimbal: [0.999198608908426, 0.010807264825764662, -0.038540147670345665, 0.03869843716420229, -0.014841305193736679, 0.9991407141244895, 0.010225992201959848, -0.9998314551398811, -0.015247635762743794] ##相机坐标系到云台坐标系的旋转矩阵
+# t_camera2gimbal: [-0.01623367254924455, 0.10082245525396162, 0.06397922557978625] ##相机坐标系到云台坐标系的平移向量
+# R_camera2gimbal: [0.99957510039094366, -0.016281095930287731, 0.024177357046297691, -0.024798240523171436, -0.039079460427628554, 0.99892834730006552, -0.015318810181940706, -0.99910345895107089, -0.039466598113030882]
+# t_camera2gimbal: [-0.17521980218357722, 0.1571525250736476, 0.10162777721249215]
+R_camera2gimbal: [0.99180976703701074, -0.02217292614121591, 0.1257845274917625, -0.12605814793619177, -0.011402145669898278, 0.99195732489508814, -0.020560382994656498, -0.99968912788949471, -0.014103837444271461]
+t_camera2gimbal: [-0.018035262777187921, 0.03005802142455815, 0.059923805562334356]
+
+
+
 
 #####-----cboard参数-----#####
 quaternion_canid: 0x100
@@ -101,7 +108,7 @@ pitch_kd: 0
 fire_thresh: 0.003
 switch_dist_diff_thresh: 0.0 # m
 
-max_yaw_acc: 20 #4310电机改为50
+max_yaw_acc: 50 #4310电机改为50
 Q_yaw: [9e6, 0] #2.7e7
 R_yaw: [1]
 
@@ -110,8 +117,40 @@ Q_pitch: [9e6, 0]
 R_pitch: [1]
 
 #####-----buff_detector参数-----#####
-model: "assets/yolo11_buff_int8.xml"
-
+model: "assets/szu-model.xml"
+buff_refine:
+  extend_rotated_rect: 1.4
+  red_minus_blue_threshold: 30
+  blue_minus_red_threshold: 62
+  armor_area_relative_error_threshold: 0.35
+  light_arm_line_samples: 15
+  solidity_threshold_ellipse: 0.8
+  solidity_threshold_rectangular: 0.66
+  expected_aspect_ratio: 5.0
+  aspect_ratio_relative_error_threshold: 0.42
+  approx_error_tolerance: 0.01
+  visualize_observation: true
+  visualize_refined: true
+  visualize_plane: true
+  visualize_motion: true
 #####-----buff_aimer参数-----#####
 fire_gap_time: 0.700   # s
 predict_time: 0.120     # s
+buff_decision:
+  data_life: 0.20
+  recover_time: 0.30
+  small:
+    max_life_time: 5.70
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.70
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+  big:
+    max_life_time: 20.00
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.40
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+    switch_confirm_count: 5

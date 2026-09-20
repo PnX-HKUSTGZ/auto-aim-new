@@ -118,8 +118,10 @@ io::Command Aimer::aim(
 
   // 计算最终角度
   Eigen::Vector3d final_xyz = debug_aim_point.xyza.head(3);
-  double yaw = std::atan2(final_xyz.y(), final_xyz.x()) + yaw_offset_;
-  double pitch = -(current_traj.pitch + pitch_offset_);  //世界坐标系下pitch向上为负
+  // 世界系方位角从 +X 起算，云台零方向为 +Y，发送角需减去 90°
+  double yaw = tools::limit_rad(
+    std::atan2(final_xyz.y(), final_xyz.x()) - M_PI / 2 + yaw_offset_);
+  double pitch = (current_traj.pitch + pitch_offset_);  //世界坐标系下pitch向上为负
   return {true, false, yaw, pitch};
 }
 

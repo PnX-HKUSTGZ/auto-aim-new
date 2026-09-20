@@ -67,9 +67,11 @@ void load(
     if (img.empty()) break;
 
     // 计算云台的欧拉角
-    Eigen::Matrix3d R_imubody2imuabs = q.toRotationMatrix();
-    Eigen::Matrix3d R_gimbal2world =
-      R_gimbal2imubody.transpose() * R_imubody2imuabs * R_gimbal2imubody;
+    // q 是电控给出的“初始姿态到当前姿态”旋转，换基到云台系即可。
+    const Eigen::Matrix3d R_gimbal2world =
+      R_gimbal2imubody.transpose() *
+      q.normalized().toRotationMatrix() *
+      R_gimbal2imubody;
     Eigen::Vector3d ypr = tools::eulers(R_gimbal2world, 2, 1, 0) * 57.3;  // degree
 
     // 在图片上显示云台的欧拉角，用来检验R_gimbal2imubody是否正确
@@ -93,7 +95,7 @@ void load(
     if (!success) continue;
 
     // 计算所需的数据
-    Eigen::Matrix3d R_world2gimbal = R_gimbal2world.transpose();
+    const Eigen::Matrix3d R_world2gimbal = R_gimbal2world.transpose();
     cv::Mat t_world2gimbal = (cv::Mat_<double>(3, 1) << 0, 0, 0);
     cv::Mat R_world2gimbal_cv;
     cv::eigen2cv(R_world2gimbal, R_world2gimbal_cv);
@@ -184,7 +186,8 @@ int main(int argc, char * argv[])
   // 计算相机同理想情况的偏角
   Eigen::Matrix3d R_camera2gimbal_eigen;
   cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
-  Eigen::Matrix3d R_gimbal2ideal{{0, -1, 0}, {0, 0, -1}, {1, 0, 0}};
+  // gimbal X右/Y前/Z上 -> 理想相机 X右/Y下/Z前。
+  Eigen::Matrix3d R_gimbal2ideal{{1, 0, 0}, {0, 0, -1}, {0, 1, 0}};
   Eigen::Matrix3d R_camera2ideal = R_gimbal2ideal * R_camera2gimbal_eigen;
   Eigen::Vector3d camera_ypr = tools::eulers(R_camera2ideal, 1, 0, 2) * 57.3;  // degree
 

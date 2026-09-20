@@ -74,6 +74,10 @@ leaving_angle: 30 # degree
 decision_speed: 7 # rad/s
 high_speed_delay_time: 0.066 # s
 low_speed_delay_time: 0.015 # s
+low_speed_thresh: 1.0 # rad/s 选板低速阈值（滞回退出）
+high_speed_thresh: 2.0 # rad/s 选板高速阈值（滞回进入）
+min_lock_hold_time: 0.15 # s 最短锁板保持时间
+switch_margin: 10 # degree 新板须优于旧板的角度
 
 #####-----shooter参数-----#####
 first_tolerance: 3 # 近距离射击容差，degree
@@ -123,3 +127,21 @@ detect:
 aim_time: 0.200 # s
 wait_time: 0.050 # s
 predict_time: 0.300 # s
+buff_decision:
+  data_life: 0.20
+  recover_time: 0.30
+  small:
+    max_life_time: 5.70
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.70
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+  big:
+    max_life_time: 20.00
+    target_switch_threshold: 0.30
+    critical_timeout: 5.00
+    fire_cooldown_time_init: 0.40
+    fire_cooldown_time: 0.70
+    fire_remaining_time_threshold: 0.04
+    switch_confirm_count: 5
