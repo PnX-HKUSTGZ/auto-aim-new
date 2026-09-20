@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.16)
 set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake")
 
 find_package(OpenVINO REQUIRED)
-find_package(Ceres REQUIRED)
 
 add_library(auto_buff OBJECT 
     rune_camera.cpp

@@ -15,6 +15,34 @@ find_package(nlohmann_json REQUIRED)
 set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/")
 find_package(OpenVINO REQUIRED)
 
+# Prefer the distribution Ceres package when it is available. A Ceres copy in
+# /usr/local can otherwise take precedence even when it was built against an
+# incompatible glog/SuiteSparse ABI. Set SP_VISION_CERES_DIR explicitly to use
+# a different installation.
+set(SP_VISION_CERES_DIR "" CACHE PATH "Ceres CMake package directory used by sp_vision")
+if(CMAKE_LIBRARY_ARCHITECTURE)
+  set(_sp_vision_system_ceres_dir
+      "/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/Ceres")
+endif()
+if(NOT SP_VISION_CERES_DIR
+   AND EXISTS "${_sp_vision_system_ceres_dir}/CeresConfig.cmake")
+  set(SP_VISION_CERES_DIR "${_sp_vision_system_ceres_dir}" CACHE PATH
+      "Ceres CMake package directory used by sp_vision" FORCE)
+endif()
+if(SP_VISION_CERES_DIR)
+  set(Ceres_DIR "${SP_VISION_CERES_DIR}" CACHE PATH "Ceres package directory" FORCE)
+endif()
+find_package(Ceres REQUIRED)
+
+# The local g2o installation adds /usr/local/lib to generated runtime paths.
+# Use the selected system Ceres before that directory, even when a shell has
+# also placed /usr/local/lib first in LD_LIBRARY_PATH.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND Ceres_DIR STREQUAL _sp_vision_system_ceres_dir)
+  list(PREPEND CMAKE_BUILD_RPATH "/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+  add_link_options("LINKER:--disable-new-dtags")
+endif()
+
 # For a custom dependency installation, pass -DCMAKE_PREFIX_PATH=<install-prefix>.
 find_package(g2o REQUIRED)
 find_package(Sophus REQUIRED)

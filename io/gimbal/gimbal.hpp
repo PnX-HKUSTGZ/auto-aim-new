@@ -179,6 +179,37 @@ private:
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
 
+  std::mutex tx_mutex_;
+  std::condition_variable tx_cv_;
+  VisionToGimbal latest_vision_{};
+  NavToGimbalV2 latest_nav_{};
+  bool vision_pending_ = false;
+  bool nav_pending_ = false;
+  bool has_vision_ = false;
+  bool has_nav_ = false;
+  bool vision_watchdog_sent_ = false;
+  bool nav_watchdog_sent_ = false;
+  Clock::time_point vision_updated_at_{};
+  Clock::time_point nav_updated_at_{};
+  Clock::time_point vision_next_send_at_{};
+  Clock::time_point nav_next_send_at_{};
+  std::deque<std::shared_ptr<DecisionRequest>> decision_queue_;
+
+  Clock::duration vision_min_period_ = std::chrono::milliseconds(10);
+  Clock::duration nav_min_period_ = std::chrono::milliseconds(20);
+  Clock::duration vision_timeout_ = std::chrono::milliseconds(100);
+  Clock::duration nav_timeout_ = std::chrono::milliseconds(200);
+  std::size_t decision_queue_capacity_ = 16;
+
+  double cmd_vel_linear_scale_ = 0.4;
+  uint8_t follow_mark_ = 2;
+  uint8_t follow_mark_default_value_ = 2;
+  uint8_t follow_mark_start_value_ = 1;
+  uint8_t follow_mark_rough_value_ = 0;
+  int follow_mark_hold_nav_count_ = 10;
+  int follow_mark_hold_remaining_ = 0;
+  double follow_mark_zero_linear_scale_ = 0.5;
+
   bool read(uint8_t * buffer, size_t size);
   void read_thread();
   void tx_loop();

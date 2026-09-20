@@ -76,10 +76,10 @@ IMU型号：使用C板内置BMI088作为IMU\
         screen
     ```
 
-2. 编译：
+2. 编译：·
     ```bash
     cmake -B build
-    make -C build/ -j`nproc`
+    make -C build/ -j`4`
     ```
 
     若 g2o、Sophus、Ceres 安装在自定义目录，首次配置时指定安装前缀：
