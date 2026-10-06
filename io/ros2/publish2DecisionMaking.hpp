@@ -7,7 +7,6 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <sentry_interfaces/msg/game_info.hpp>
-#include <sentry_interfaces/msg/radar_info.hpp>
 #include <sentry_interfaces/msg/sentry_info_offline.hpp>
 #include <sentry_interfaces/msg/sentry_info_online.hpp>
 #include <sentry_interfaces/msg/team_info.hpp>
@@ -37,7 +36,6 @@ private:
   rclcpp::Publisher<sentry_interfaces::msg::SentryInfoOnline>::SharedPtr online_info_pub_;
   rclcpp::Publisher<sentry_interfaces::msg::SentryInfoOffline>::SharedPtr offline_info_pub_;
   rclcpp::Publisher<sentry_interfaces::msg::TeamInfo>::SharedPtr team_info_pub_;
-  rclcpp::Publisher<sentry_interfaces::msg::RadarInfo>::SharedPtr radar_info_pub_;
   rclcpp::TimerBase::SharedPtr referee_timer_;
 };
 }  // namespace io

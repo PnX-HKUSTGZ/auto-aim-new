@@ -15,7 +15,6 @@ Publish2DecisionMaking::Publish2DecisionMaking(Gimbal & gimbal)
   offline_info_pub_ =
     create_publisher<sentry_interfaces::msg::SentryInfoOffline>("/sentry/offline_info", 10);
   team_info_pub_ = create_publisher<sentry_interfaces::msg::TeamInfo>("/sentry/team_info", 10);
-  radar_info_pub_ = create_publisher<sentry_interfaces::msg::RadarInfo>("/sentry/radar_info", 10);
 
   referee_timer_ = create_wall_timer(10ms, [this]() { publish_referee_state(); });
 
@@ -24,7 +23,7 @@ Publish2DecisionMaking::Publish2DecisionMaking(Gimbal & gimbal)
 
 Publish2DecisionMaking::~Publish2DecisionMaking()
 {
-  RCLCPP_INFO(get_logger(), "Decision-to-gimbal bridge shutting down");
+  RCLCPP_INFO(get_logger(), "Referee uplink bridge shutting down");
 }
 
 void Publish2DecisionMaking::publish_referee_state()
@@ -54,9 +53,8 @@ void Publish2DecisionMaking::publish_referee_state()
   team.outpost_hp = state.our_outpost_hp;
   team_info_pub_->publish(team);
 
-  // SentryInfoOffline / RadarInfo 的字段 MCU 尚未提供，待上行帧扩展后再发布。
+  // SentryInfoOffline 的视觉锁定等字段待在 auto-aim 侧接入后发布。
   (void)offline_info_pub_;
-  (void)radar_info_pub_;
 
   last_referee_sequence_ = state.sequence;
 }

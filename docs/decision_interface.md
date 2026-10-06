@@ -21,8 +21,7 @@ MCU  <--串口-->  auto-aim (io::Gimbal)
 | `/sentry/game_info` | `GameInfo` | `Gimbal::referee_state()` |
 | `/sentry/online_info` | `SentryInfoOnline` | 同上 |
 | `/sentry/team_info` | `TeamInfo` | 同上 |
-| `/sentry/offline_info` | `SentryInfoOffline` | 待 MCU 上行帧扩展 |
-| `/sentry/radar_info` | `RadarInfo` | 待 MCU/雷达 |
+| `/sentry/offline_info` | `SentryInfoOffline` | 自瞄视觉 / 本机状态（`is_get`/`armor_pos`/`armor_num` 待接入） |
 
 `Publish2DecisionMaking` 每 10ms 检查一次 `RefereeState.sequence`，有新帧才发布。
 
@@ -41,7 +40,7 @@ MCU 执行后应回 `DecisionAck`（`/sentry/decision_ack`），由 auto-aim 发
 - 现有高频控制帧（`VisionToGimbal` / `NavToGimbalV2`）**保持不变**。
 - 旧的 4 字节 `DecisionToGimbal`（`ifreload`）已无 ROS 调用方（原 `/set_bool` service 已移除），
   待 P2.3b 用统一帧替换。
-- 新帧为低频、带 `version` 与 `crc16` 的统一帧，仅承载裁判/决策数据；字节布局与动作集合待与电控/MCU 确认。
+- 新帧为低频、带 `version`/`type`/`length` 与 `crc16` 的统一帧；v1 字节布局、动作 `code` 与电平语义见 [serial_protocol.md](serial_protocol.md) §2。
 
 ## 构建依赖
 
@@ -51,7 +50,7 @@ auto-aim 是纯 CMake 工程，ROS 为可选依赖：找不到 ROS 时整体跳�
 
 ## 当前进度
 
-- [x] 上行：`GameInfo` / `SentryInfoOnline` / `TeamInfo` 有数据；`Offline` / `Radar` 待 MCU 帧。
+- [x] 上行：`GameInfo` / `SentryInfoOnline` / `TeamInfo` 有数据；`Offline` 的视觉字段待在 auto-aim 侧接入。
 - [x] 下行：`Subscribe2Decision` 接收 `/sentry/decision_command`（当前仅记录，未写串口）。
-- [ ] 上行帧扩展，填充 `Offline` / `Radar` 等字段。
 - [ ] 下行串口帧与 `DecisionAck`（P2.3b，待与电控/MCU 定协议）。
+- [ ] 上行帧扩展（`Offline` 视觉字段、雷达等后续再加）。
