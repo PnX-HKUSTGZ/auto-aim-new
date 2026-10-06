@@ -23,7 +23,7 @@ Subscribe2Decision::~Subscribe2Decision()
 void Subscribe2Decision::command_callback(
   const sentry_interfaces::msg::DecisionCommand::SharedPtr msg)
 {
-  // TODO(接口): MCU 决策下行帧确定后，在此把 action 打包为串口帧下发，
+  // TODO(P2.3b): MCU 决策下行帧确定后，在此把 action 打包为串口帧下发，
   // 并在收到执行回执后通过 ack_pub_ 发布 DecisionAck。当前仅记录，不发送。
   RCLCPP_INFO(
     get_logger(), "received decision command request_id=%u kind=%u mode=%u value=%d",

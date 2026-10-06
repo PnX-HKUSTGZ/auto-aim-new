@@ -19,7 +19,7 @@ Publish2DecisionMaking::Publish2DecisionMaking(Gimbal & gimbal)
 
   referee_timer_ = create_wall_timer(10ms, [this]() { publish_referee_state(); });
 
-  RCLCPP_INFO(get_logger(), "Decision-to-gimbal bridge initialized");
+  RCLCPP_INFO(get_logger(), "Referee uplink bridge initialized");
 }
 
 Publish2DecisionMaking::~Publish2DecisionMaking()
