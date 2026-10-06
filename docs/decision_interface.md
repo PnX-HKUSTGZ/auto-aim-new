@@ -38,8 +38,7 @@ MCU 执行后应回 `DecisionAck`（`/sentry/decision_ack`），由 auto-aim 发
 
 - **当前**串口协议见 [docs/serial_protocol.md](serial_protocol.md)。
 - 现有高频控制帧（`VisionToGimbal` / `NavToGimbalV2`）**保持不变**。
-- 旧的 4 字节 `DecisionToGimbal`（`ifreload`）已无 ROS 调用方（原 `/set_bool` service 已移除），
-  待 P2.3b 用统一帧替换。
+- 旧的 4 字节 `DecisionToGimbal`（`ifreload`）已从代码移除，由 §2.3 的统一帧取代。
 - 新帧为低频、带 `version`/`type`/`length` 与 `crc16` 的统一帧；v1 字节布局、动作 `code` 与电平语义见 [serial_protocol.md](serial_protocol.md) §2。
 
 ## 构建依赖
@@ -50,7 +49,8 @@ auto-aim 是纯 CMake 工程，ROS 为可选依赖：找不到 ROS 时整体跳�
 
 ## 当前进度
 
-- [x] 上行：`GameInfo` / `SentryInfoOnline` / `TeamInfo` 有数据；`Offline` 的视觉字段待在 auto-aim 侧接入。
-- [x] 下行：`Subscribe2Decision` 接收 `/sentry/decision_command`（当前仅记录，未写串口）。
-- [ ] 下行串口帧与 `DecisionAck`（P2.3b，待与电控/MCU 定协议）。
+- [x] 上行：`GameInfo` / `SentryInfoOnline` / `TeamInfo` 有数据（统一帧）；`Offline` 的视觉字段待在 auto-aim 侧接入。
+- [x] 下行：`Subscribe2Decision` 收到命令后按 v1 组帧经串口下发（`Gimbal::send_decision_command`）。
+- [x] 回执：MCU `DecisionAck` 帧 → `Subscribe2Decision` 发布 `/sentry/decision_ack`。
+- [ ] MCU 侧实现 §2 的 v1 帧（上行裁判 / 下行决策 / 回执）。
 - [ ] 上行帧扩展（`Offline` 视觉字段、雷达等后续再加）。

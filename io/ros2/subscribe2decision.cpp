@@ -1,5 +1,6 @@
 #include "subscribe2decision.hpp"
 
+#include <chrono>
 #include <functional>
 
 namespace io
@@ -11,6 +12,8 @@ Subscribe2Decision::Subscribe2Decision(Gimbal & gimbal)
     "/sentry/decision_command", 10,
     std::bind(&Subscribe2Decision::command_callback, this, std::placeholders::_1));
   ack_pub_ = create_publisher<sentry_interfaces::msg::DecisionAck>("/sentry/decision_ack", 10);
+  ack_timer_ =
+    create_wall_timer(std::chrono::milliseconds(10), [this]() { publish_acks(); });
 
   RCLCPP_INFO(get_logger(), "Decision-command bridge initialized");
 }
@@ -23,14 +26,34 @@ Subscribe2Decision::~Subscribe2Decision()
 void Subscribe2Decision::command_callback(
   const sentry_interfaces::msg::DecisionCommand::SharedPtr msg)
 {
-  // TODO(P2.3b): MCU 决策下行帧确定后，在此把 action 打包为串口帧下发，
-  // 并在收到执行回执后通过 ack_pub_ 发布 DecisionAck。当前仅记录，不发送。
+  io::DecisionCommand command;
+  command.request_id = msg->request_id;
+  command.kind = msg->action.kind;
+  command.mode = msg->action.mode;
+  command.interval_ms = msg->action.interval_ms;
+  command.value = msg->action.value;
+
+  if (!gimbal_.send_decision_command(command)) {
+    RCLCPP_WARN(get_logger(), "decision command enqueue failed request_id=%u", msg->request_id);
+    return;
+  }
   RCLCPP_INFO(
-    get_logger(), "received decision command request_id=%u kind=%u mode=%u value=%d",
+    get_logger(), "decision command sent request_id=%u kind=%u mode=%u",
     msg->request_id, static_cast<unsigned>(msg->action.kind),
-    static_cast<unsigned>(msg->action.mode), msg->action.value);
-  (void)gimbal_;
-  (void)ack_pub_;
+    static_cast<unsigned>(msg->action.mode));
+}
+
+void Subscribe2Decision::publish_acks()
+{
+  io::DecisionAck ack;
+  while (gimbal_.pop_decision_ack(&ack)) {
+    sentry_interfaces::msg::DecisionAck msg;
+    msg.header.stamp = now();
+    msg.request_id = ack.request_id;
+    msg.accepted = ack.accepted != 0;
+    msg.code = ack.code;
+    ack_pub_->publish(msg);
+  }
 }
 
 void Subscribe2Decision::start()

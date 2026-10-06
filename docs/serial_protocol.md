@@ -2,6 +2,7 @@
 
 > 与 MCU 对齐的是第 2 节的**新帧族 v1**；第 1 节现有帧保持不变，仅作背景。
 > ROS 侧契约见决策仓库 `docs/INTERFACES.md`；位段含义见 `sentry_decision_core/referee_protocol.hpp`。
+> 实现状态：上位机（auto-aim）已按 §2 实现帧收发；MCU 侧待实现。
 
 ## 1. 约定与现有帧
 

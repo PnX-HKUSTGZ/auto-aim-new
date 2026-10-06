@@ -34,7 +34,10 @@ void Publish2DecisionMaking::publish_referee_state()
 
   sentry_interfaces::msg::GameInfo game;
   game.header.stamp = stamp;
-  game.game_status = state.game_start ? 4 : 0;  // 阶段只有 0/4，完整语义待 MCU 扩展
+  // 统一帧带完整 game_status；旧 0x5A 只有 game_start，已在 Gimbal 内映射为 0/4。
+  game.game_status = state.game_status;
+  game.game_time_remaining = state.game_time_remaining;
+  game.coin_remaining = state.coins;
   game.detect_color = state.detect_color;
   game.can_rebuild_outpost = state.can_rebuild_outpost;
   game.enemy_base_hp = state.enemy_base_hp;
@@ -45,6 +48,8 @@ void Publish2DecisionMaking::publish_referee_state()
   online.header.stamp = stamp;
   online.self_health = state.sentry_hp;
   online.bullets_remaining = state.remain_ammo;
+  online.sentry_info_1 = state.sentry_info_1;
+  online.sentry_info_2 = state.sentry_info_2;
   online_info_pub_->publish(online);
 
   sentry_interfaces::msg::TeamInfo team;

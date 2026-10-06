@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <optional>
 
@@ -212,33 +213,24 @@ uint8_t Gimbal::set_follow_mark(bool enabled)
   return follow_mark_;
 }
 
-bool Gimbal::send_decision(bool reload, std::chrono::milliseconds timeout)
+bool Gimbal::send_decision_command(const DecisionCommand & command)
 {
-  auto request = std::make_shared<DecisionRequest>();
-  request->packet.ifreload = reload ? 1 : 0;
-  auto result = request->completion.get_future();
-
   {
     std::lock_guard<std::mutex> lock(tx_mutex_);
-    if (quit_ || decision_queue_.size() >= decision_queue_capacity_) return false;
-    decision_queue_.push_back(request);
+    if (quit_ || decision_cmd_queue_.size() >= decision_queue_capacity_) return false;
+    decision_cmd_queue_.push_back(command);
   }
   tx_cv_.notify_one();
+  return true;
+}
 
-  if (result.wait_for(timeout) != std::future_status::ready) {
-    std::lock_guard<std::mutex> lock(tx_mutex_);
-    const auto it = std::find(decision_queue_.begin(), decision_queue_.end(), request);
-    if (it != decision_queue_.end()) {
-      decision_queue_.erase(it);
-      return false;
-    }
-  }
-
-  try {
-    return result.get();
-  } catch (const std::future_error &) {
-    return false;
-  }
+bool Gimbal::pop_decision_ack(DecisionAck * out)
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  if (ack_queue_.empty()) return false;
+  *out = ack_queue_.front();
+  ack_queue_.pop_front();
+  return true;
 }
 
 bool Gimbal::read(uint8_t * buffer, size_t size)
@@ -269,14 +261,23 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (!read(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_.header))) {
+    uint8_t header = 0;
+    if (!read(&header, 1)) {
       error_count++;
       tools::logger()->debug("[Gimbal] read header failed, error_count={}", error_count);
       continue;
     }
 
-    if (rx_data_.header != 0x5A) continue;
+    // 统一帧（协议 v1）：0xAA 开头、变长。
+    if (header == kFrameMagic) {
+      read_unified_frame();
+      error_count = 0;
+      continue;
+    }
 
+    if (header != 0x5A) continue;
+
+    rx_data_.header = header;
     auto t = std::chrono::steady_clock::now();
 
     if (!read(
@@ -310,6 +311,7 @@ void Gimbal::read_thread()
     referee_state_.detect_color = rx_data_.detect_color;
     referee_state_.reset_tracker = rx_data_.reset_tracker;
     referee_state_.game_start = rx_data_.game_start;
+    referee_state_.game_status = rx_data_.game_start ? 4 : 0;
     referee_state_.can_rebuild_outpost = rx_data_.can_rebuild_outpost;
     referee_state_.sentry_hp = rx_data_.sentryHP;
     referee_state_.our_base_hp = rx_data_.our_baseHP;
@@ -341,6 +343,86 @@ void Gimbal::read_thread()
   tools::logger()->info("[Gimbal] read_thread stopped.");
 }
 
+void Gimbal::read_unified_frame()
+{
+  uint8_t head[4];
+  if (!read(head, sizeof(head))) {
+    tools::logger()->debug("[Gimbal] unified header read failed.");
+    return;
+  }
+
+  const uint8_t version = head[0];
+  const uint8_t type = head[1];
+  const uint16_t length = static_cast<uint16_t>(head[2]) | (static_cast<uint16_t>(head[3]) << 8);
+  if (version != kFrameVersion || length > kFrameMaxPayload) {
+    tools::logger()->debug("[Gimbal] unified frame version/length invalid.");
+    return;
+  }
+
+  uint8_t payload[kFrameMaxPayload]{};
+  if (length > 0 && !read(payload, length)) {
+    tools::logger()->debug("[Gimbal] unified payload read failed.");
+    return;
+  }
+
+  uint8_t crc_bytes[2];
+  if (!read(crc_bytes, sizeof(crc_bytes))) {
+    tools::logger()->debug("[Gimbal] unified crc read failed.");
+    return;
+  }
+
+  uint8_t buffer[4 + kFrameMaxPayload + 2];
+  buffer[0] = head[0];
+  buffer[1] = head[1];
+  buffer[2] = head[2];
+  buffer[3] = head[3];
+  if (length > 0) std::memcpy(buffer + 4, payload, length);
+  buffer[4 + length] = crc_bytes[0];
+  buffer[5 + length] = crc_bytes[1];
+
+  // CRC 覆盖 version..payload（偏移 1 ~ 4+length），check_crc16 的 len 含末尾 crc。
+  if (!tools::check_crc16(buffer, static_cast<uint32_t>(6 + length))) {
+    tools::logger()->debug("[Gimbal] unified frame CRC16 check failed.");
+    return;
+  }
+
+  handle_unified_frame(type, payload, length);
+}
+
+void Gimbal::handle_unified_frame(uint8_t type, const uint8_t * payload, uint16_t length)
+{
+  if (type == kFrameTypeRefereeUplink && length == sizeof(RefereeUplinkPayload)) {
+    RefereeUplinkPayload packet;
+    std::memcpy(&packet, payload, sizeof(packet));
+
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    referee_state_.sequence++;
+    referee_state_.has_unified = true;
+    referee_state_.game_status = packet.game_status;
+    referee_state_.game_start = packet.game_status == 4;
+    referee_state_.game_time_remaining = packet.game_time_remaining;
+    referee_state_.coins = packet.coin_remaining;
+    referee_state_.detect_color = packet.detect_color;
+    referee_state_.can_rebuild_outpost = (packet.flags & 0x01) != 0;
+    referee_state_.sentry_hp = packet.sentry_hp;
+    referee_state_.remain_ammo = packet.sentry_ammo;
+    referee_state_.our_base_hp = packet.our_base_hp;
+    referee_state_.our_outpost_hp = packet.our_outpost_hp;
+    referee_state_.enemy_base_hp = packet.enemy_base_hp;
+    referee_state_.enemy_outpost_hp = packet.enemy_outpost_hp;
+    referee_state_.event_code = packet.event_code;
+    referee_state_.sentry_info_1 = packet.sentry_info_1;
+    referee_state_.sentry_info_2 = packet.sentry_info_2;
+  } else if (type == kFrameTypeDecisionAck && length == sizeof(DecisionAck)) {
+    DecisionAck ack;
+    std::memcpy(&ack, payload, sizeof(ack));
+
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    ack_queue_.push_back(ack);
+    if (ack_queue_.size() > 64) ack_queue_.pop_front();
+  }
+}
+
 void Gimbal::tx_loop()
 {
   tools::logger()->info("[Gimbal] tx_thread started.");
@@ -348,13 +430,13 @@ void Gimbal::tx_loop()
   while (!quit_) {
     std::optional<VisionToGimbal> vision_packet;
     std::optional<NavToGimbalV2> nav_packet;
-    std::shared_ptr<DecisionRequest> decision_request;
+    std::optional<DecisionCommand> decision_packet;
 
     {
       std::unique_lock<std::mutex> lock(tx_mutex_);
       while (!quit_) {
         const auto now = Clock::now();
-        const bool decision_due = !decision_queue_.empty();
+        const bool decision_due = !decision_cmd_queue_.empty();
         const bool vision_due = vision_pending_ && now >= vision_next_send_at_;
         const bool nav_due = nav_pending_ && now >= nav_next_send_at_;
         const bool vision_watchdog_due =
@@ -366,8 +448,8 @@ void Gimbal::tx_loop()
 
         if (decision_due || vision_due || nav_due || vision_watchdog_due || nav_watchdog_due) {
           if (decision_due) {
-            decision_request = decision_queue_.front();
-            decision_queue_.pop_front();
+            decision_packet = decision_cmd_queue_.front();
+            decision_cmd_queue_.pop_front();
           }
 
           if (vision_due) {
@@ -425,21 +507,19 @@ void Gimbal::tx_loop()
       }
     }
 
-    if (quit_) {
-      if (decision_request) decision_request->completion.set_value(false);
-      break;
-    }
+    if (quit_) break;
 
-    if (decision_request) {
-      decision_request->completion.set_value(write_packet(decision_request->packet));
-    }
     if (vision_packet) write_packet(*vision_packet);
     if (nav_packet) write_packet(*nav_packet);
+    if (decision_packet) {
+      write_unified_frame(
+        kFrameTypeDecisionCommand, reinterpret_cast<const uint8_t *>(&*decision_packet),
+        sizeof(DecisionCommand));
+    }
   }
 
   std::lock_guard<std::mutex> lock(tx_mutex_);
-  for (const auto & request : decision_queue_) request->completion.set_value(false);
-  decision_queue_.clear();
+  decision_cmd_queue_.clear();
   tools::logger()->info("[Gimbal] tx_thread stopped.");
 }
 
@@ -467,13 +547,31 @@ bool Gimbal::write_packet(NavToGimbalV2 packet)
   return false;
 }
 
-bool Gimbal::write_packet(DecisionToGimbal packet)
+bool Gimbal::write_unified_frame(uint8_t type, const uint8_t * payload, uint16_t length)
 {
+  if (length > kFrameMaxPayload) return false;
+
+  // 先组 version..payload 段并追加 crc，再在前面补 magic，保证 CRC 覆盖范围正确。
+  uint8_t body[4 + kFrameMaxPayload + 2];
+  body[0] = kFrameVersion;
+  body[1] = type;
+  body[2] = static_cast<uint8_t>(length & 0xFF);
+  body[3] = static_cast<uint8_t>((length >> 8) & 0xFF);
+  if (length > 0) std::memcpy(body + 4, payload, length);
+  const uint16_t crc = tools::get_crc16(body, static_cast<uint32_t>(4 + length));
+  body[4 + length] = static_cast<uint8_t>(crc & 0xFF);
+  body[5 + length] = static_cast<uint8_t>((crc >> 8) & 0xFF);
+
+  uint8_t frame[1 + 4 + kFrameMaxPayload + 2];
+  frame[0] = kFrameMagic;
+  std::memcpy(frame + 1, body, static_cast<size_t>(6 + length));
+
   try {
-    if (write_serial_packet(serial_, packet)) return true;
-    tools::logger()->warn("[Gimbal] Incomplete DecisionToGimbal write.");
+    const size_t total = static_cast<size_t>(7 + length);
+    if (serial_.write(frame, total) == total) return true;
+    tools::logger()->warn("[Gimbal] Incomplete unified frame write.");
   } catch (const std::exception & e) {
-    tools::logger()->warn("[Gimbal] Failed to write DecisionToGimbal: {}", e.what());
+    tools::logger()->warn("[Gimbal] Failed to write unified frame: {}", e.what());
   }
   reconnect_requested_ = true;
   return false;
