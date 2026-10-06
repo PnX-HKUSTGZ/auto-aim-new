@@ -37,21 +37,21 @@ MCU 执行后应回 `DecisionAck`（`/sentry/decision_ack`），由 auto-aim 发
 
 ## 与串口帧的关系
 
-- **当前**串口协议（`GimbalToVision` / `VisionToGimbal` / `NavToGimbalV2` / `DecisionToGimbal`）
-  见 [docs/serial_protocol.md](serial_protocol.md)（此前只存在于代码，现已补文档）。
+- **当前**串口协议见 [docs/serial_protocol.md](serial_protocol.md)。
 - 现有高频控制帧（`VisionToGimbal` / `NavToGimbalV2`）**保持不变**。
-- 新增的裁判/决策帧是低频的、带 `version` 与 `crc16` 的统一帧，仅承载上述消息的数据。
-  字节布局与动作集合待与电控/MCU 确认后实现。
+- 旧的 4 字节 `DecisionToGimbal`（`ifreload`）已无 ROS 调用方（原 `/set_bool` service 已移除），
+  待 P2.3b 用统一帧替换。
+- 新帧为低频、带 `version` 与 `crc16` 的统一帧，仅承载裁判/决策数据；字节布局与动作集合待与电控/MCU 确认。
 
 ## 构建依赖
 
-auto-aim 是纯 CMake 工程，ROS 为可选依赖（`SP_VISION_WITH_ROS2`）。使用本接口需要
-`find_package(sentry_interfaces)`，即运行/编译环境需 source 含该包的 ROS 工作区
-（当前该包在决策仓库 `sentry_decision_RM27/src/sentry_interfaces`）。
+auto-aim 是纯 CMake 工程，ROS 为可选依赖：找不到 ROS 时整体跳过 ROS 代码（`SP_VISION_WITH_ROS2`）。
+一旦编译 ROS，`sentry_interfaces` 就是**硬依赖**（`find_package(sentry_interfaces REQUIRED)`，缺则配置失败），
+避免只跳过决策桥、却把导航桥一起悄悄编译掉。该包在决策仓库 `sentry_decision_RM27/src/sentry_interfaces`。
 
 ## 当前进度
 
-- [x] 上行迁到 5 个 `sentry_interfaces` 消息（Phase 1：GameInfo / SentryInfoOnline / TeamInfo 有数据）。
-- [x] 新增 `Subscribe2Decision` 接收 `/sentry/decision_command`（暂只记录，待 MCU 帧）。
-- [ ] MCU 上行帧扩展，填充 Offline / Radar / 更多字段。
-- [ ] MCU 下行帧与 `DecisionAck`。
+- [x] 上行：`GameInfo` / `SentryInfoOnline` / `TeamInfo` 有数据；`Offline` / `Radar` 待 MCU 帧。
+- [x] 下行：`Subscribe2Decision` 接收 `/sentry/decision_command`（当前仅记录，未写串口）。
+- [ ] 上行帧扩展，填充 `Offline` / `Radar` 等字段。
+- [ ] 下行串口帧与 `DecisionAck`（P2.3b，待与电控/MCU 定协议）。

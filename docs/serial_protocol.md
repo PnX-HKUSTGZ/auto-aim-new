@@ -1,6 +1,6 @@
 # 下位机串口协议（auto-aim ↔ MCU）
 
-> 现状说明：此前该协议只隐式定义在 `io/gimbal/gimbal.hpp` 的 C++ 结构体里，没有文档。本文补齐**当前在用**的协议。
+> 本文记录**当前在用**的串口协议。
 > 上位机内部（ROS）契约见 `docs/decision_interface.md` 与决策仓库 `docs/INTERFACES.md`。
 
 ## 1. 物理层
@@ -92,11 +92,13 @@
 | 1 | uint8 | `ifreload` | **唯一内容字段，语义未确认** |
 | 2 | uint16 | `crc16` | |
 
+旧 `/set_bool` service 已随决策接口迁移移除，该帧目前**无调用方**；将由 P2.3b 的统一帧取代。
+
 ## 5. 发送调度（`Gimbal::tx_loop`）
 
 - 云台帧：上限 `vision_tx_max_hz`（默认 100 Hz）；`vision_timeout_ms`（默认 100）无更新则发一帧停止帧。
 - 导航帧：上限 `nav_tx_max_hz`（默认 50 Hz）；`nav_timeout_ms`（默认 200）无更新则发停止帧。
-- 决策帧：请求入队（`decision_queue_capacity` 默认 16），逐条发送；`send_decision` 等待写入结果，超时默认 1s。
+- 决策帧：请求入队（`decision_queue_capacity` 默认 16），逐条发送；`send_decision` 等待写入结果，超时默认 1s。当前无调用方，保留待 P2.3b。
 - 三者共享一条串口，按最小周期与优先级在 tx 线程内串行发送。
 
 ## 6. 已知缺口（本次重构要解决）
