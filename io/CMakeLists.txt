@@ -49,6 +49,10 @@ find_package(std_srvs QUIET)
 if(NOT ament_cmake_FOUND OR NOT rclcpp_FOUND OR NOT std_msgs_FOUND OR NOT rosidl_typesupport_cpp_FOUND OR NOT geometry_msgs_FOUND OR NOT std_srvs_FOUND)
     message(WARNING "ROS2 not found, skipping ROS2 specific code.")
 else()
+    # 决策接口是 ROS 构建的硬依赖。缺它时若只 WARNING 跳过，会把导航桥
+    # (subscribe2nav / publish2nav) 一起悄悄编译掉，因此这里直接失败。
+    find_package(sentry_interfaces REQUIRED)
+
     message(STATUS "ROS2 environment found, compiling ROS2-related code.")
 
     # 添加 ROS2 相关的文件
@@ -56,10 +60,11 @@ else()
         ros2/publish2nav.cpp
         ros2/publish2DecisionMaking.cpp
         ros2/ros2.cpp
+        ros2/subscribe2decision.cpp
         ros2/subscribe2nav.cpp
     )
     target_compile_definitions(io PUBLIC SP_VISION_WITH_ROS2)
 
     # 设置 ROS2 依赖
-    ament_target_dependencies(io rclcpp std_msgs geometry_msgs std_srvs)
+    ament_target_dependencies(io rclcpp std_msgs geometry_msgs std_srvs sentry_interfaces)
 endif()

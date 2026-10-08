@@ -13,6 +13,7 @@
 
 #include "publish2DecisionMaking.hpp"
 #include "publish2nav.hpp"
+#include "subscribe2decision.hpp"
 #include "subscribe2nav.hpp"
 
 #endif
@@ -51,10 +52,12 @@ private:
   std::shared_ptr<Publish2Nav> publish2nav_;
   std::shared_ptr<Subscribe2Nav> subscribe2nav_;
   std::shared_ptr<Publish2DecisionMaking> publish2decision_making_;
+  std::shared_ptr<Subscribe2Decision> subscribe2decision_;
 
   std::unique_ptr<std::thread> publish_spin_thread_;
   std::unique_ptr<std::thread> subscribe_spin_thread_;
   std::unique_ptr<std::thread> decision_spin_thread_;
+  std::unique_ptr<std::thread> decision_command_spin_thread_;
 #else
   ROS2() = default;
 

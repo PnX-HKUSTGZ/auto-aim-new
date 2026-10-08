@@ -83,15 +83,56 @@ struct __attribute__((packed)) NavToGimbalV2
 static_assert(sizeof(NavToGimbalV2) == 28, "NavToGimbalV2 layout mismatch");
 static_assert(std::is_trivially_copyable_v<NavToGimbalV2>);
 
-struct __attribute__((packed)) DecisionToGimbal
-{
-  uint8_t header = 0xA7;
-  uint8_t ifreload;
-  uint16_t crc16 = 0;
-};
+// ---- 统一帧（协议 v1，见 docs/serial_protocol.md §2）----
+constexpr uint8_t kFrameMagic = 0xAA;
+constexpr uint8_t kFrameVersion = 0x01;
+constexpr uint8_t kFrameTypeRefereeUplink = 0x01;
+constexpr uint8_t kFrameTypeDecisionCommand = 0x02;
+constexpr uint8_t kFrameTypeDecisionAck = 0x03;
+constexpr uint16_t kFrameMaxPayload = 64;
 
-static_assert(sizeof(DecisionToGimbal) == 4, "DecisionToGimbal layout mismatch");
-static_assert(std::is_trivially_copyable_v<DecisionToGimbal>);
+// type=0x01：MCU 上行裁判 / 自身（29 字节）。
+struct __attribute__((packed)) RefereeUplinkPayload
+{
+  uint8_t game_status = 0;
+  uint16_t game_time_remaining = 0;
+  uint16_t coin_remaining = 0;
+  uint8_t detect_color = 0;
+  uint8_t flags = 0;  // bit0: can_rebuild_outpost
+  uint16_t sentry_hp = 0;
+  uint16_t sentry_ammo = 0;
+  uint16_t our_base_hp = 0;
+  uint16_t our_outpost_hp = 0;
+  uint16_t enemy_base_hp = 0;
+  uint16_t enemy_outpost_hp = 0;
+  uint32_t event_code = 0;
+  uint32_t sentry_info_1 = 0;
+  uint16_t sentry_info_2 = 0;
+};
+static_assert(sizeof(RefereeUplinkPayload) == 29, "RefereeUplinkPayload layout mismatch");
+static_assert(std::is_trivially_copyable_v<RefereeUplinkPayload>);
+
+// type=0x02：上位机下行决策命令（12 字节）。
+struct __attribute__((packed)) DecisionCommand
+{
+  uint32_t request_id = 0;
+  uint8_t kind = 0;
+  uint8_t mode = 0;  // 0: one-shot / 1: polled
+  uint16_t interval_ms = 0;
+  int32_t value = 0;
+};
+static_assert(sizeof(DecisionCommand) == 12, "DecisionCommand layout mismatch");
+static_assert(std::is_trivially_copyable_v<DecisionCommand>);
+
+// type=0x03：MCU 上行执行回执（6 字节）。
+struct __attribute__((packed)) DecisionAck
+{
+  uint32_t request_id = 0;
+  uint8_t accepted = 0;
+  uint8_t code = 0;
+};
+static_assert(sizeof(DecisionAck) == 6, "DecisionAck layout mismatch");
+static_assert(std::is_trivially_copyable_v<DecisionAck>);
 
 enum class GimbalMode
 {
@@ -124,6 +165,15 @@ struct RefereeState
   uint16_t our_outpost_hp = 0;
   uint16_t enemy_outpost_hp = 0;
   uint16_t remain_ammo = 0;
+
+  // 统一帧（协议 v1）字段；未收到统一帧时保持默认。
+  bool has_unified = false;
+  uint8_t game_status = 0;  // 0 未开始 / 1 准备 / 2 自检 / 3 倒计时 / 4 比赛中 / 5 结算
+  uint16_t game_time_remaining = 0;
+  uint16_t coins = 0;
+  uint32_t event_code = 0;
+  uint32_t sentry_info_1 = 0;
+  uint16_t sentry_info_2 = 0;
 };
 
 class Gimbal
@@ -151,16 +201,14 @@ public:
 
   uint8_t set_follow_mark(bool enabled);
 
-  bool send_decision(bool reload, std::chrono::milliseconds timeout = std::chrono::seconds(1));
+  // 下行决策命令：入队后由 tx 线程按协议 v1 组帧发送。队列满返回 false。
+  bool send_decision_command(const DecisionCommand & command);
+
+  // 取出自上次调用以来收到的执行回执；无则返回 false。
+  bool pop_decision_ack(DecisionAck * out);
 
 private:
   using Clock = std::chrono::steady_clock;
-
-  struct DecisionRequest
-  {
-    DecisionToGimbal packet{};
-    std::promise<bool> completion;
-  };
 
   serial::Serial serial_;
 
@@ -193,7 +241,8 @@ private:
   Clock::time_point nav_updated_at_{};
   Clock::time_point vision_next_send_at_{};
   Clock::time_point nav_next_send_at_{};
-  std::deque<std::shared_ptr<DecisionRequest>> decision_queue_;
+  std::deque<DecisionCommand> decision_cmd_queue_;  // 由 tx_mutex_ 保护
+  std::deque<DecisionAck> ack_queue_;                // 由 state_mutex_ 保护
 
   Clock::duration vision_min_period_ = std::chrono::milliseconds(10);
   Clock::duration nav_min_period_ = std::chrono::milliseconds(20);
@@ -212,10 +261,12 @@ private:
 
   bool read(uint8_t * buffer, size_t size);
   void read_thread();
+  void read_unified_frame();
+  void handle_unified_frame(uint8_t type, const uint8_t * payload, uint16_t length);
   void tx_loop();
   bool write_packet(VisionToGimbal packet);
   bool write_packet(NavToGimbalV2 packet);
-  bool write_packet(DecisionToGimbal packet);
+  bool write_unified_frame(uint8_t type, const uint8_t * payload, uint16_t length);
   void reconnect();
 };
 
