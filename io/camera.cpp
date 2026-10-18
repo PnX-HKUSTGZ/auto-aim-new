@@ -4,6 +4,7 @@
 
 #include "hikrobot/hikrobot.hpp"
 #include "mindvision/mindvision.hpp"
+#include "tools/exiter.hpp"
 #include "tools/yaml.hpp"
 
 namespace io
@@ -34,6 +35,12 @@ Camera::Camera(const std::string & config_path)
 void Camera::read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
 {
   camera_->read(img, timestamp);
+
+  // 退出时若还没有任何一帧，给一个占位图，避免调用方对空 Mat 做后续处理。
+  if (img.empty() && tools::exit_requested()) {
+    img = cv::Mat::zeros(640, 640, CV_8UC3);
+    timestamp = std::chrono::steady_clock::now();
+  }
 }
 
 }  // namespace io

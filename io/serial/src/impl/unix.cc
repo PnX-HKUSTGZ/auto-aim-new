@@ -152,6 +152,16 @@ void Serial::SerialImpl::open()
     }
   }
 
+  // 独占串口：阻止其他进程再打开同一设备（后续 open 返回 EBUSY），
+  // 避免两个读者把帧读碎。最后一方 close 后自动解除。
+  if (::ioctl(fd_, TIOCEXCL) < 0) {
+    const int saved_errno = errno;
+    ::close(fd_);
+    fd_ = -1;
+    errno = saved_errno;
+    THROW(IOException, errno);
+  }
+
   reconfigurePort();
   is_open_ = true;
 }
@@ -532,6 +542,10 @@ void Serial::SerialImpl::close()
 {
   if (is_open_ == true) {
     if (fd_ != -1) {
+      // 主动清除独占标志：即使还有别的进程持有该 tty 的 fd，
+      // 下次 open 也不会因为我们自己设置的 TIOCEXCL 而 EBUSY。
+      ::ioctl(fd_, TIOCNXCL);
+
       int ret;
       ret = ::close(fd_);
       if (ret == 0) {

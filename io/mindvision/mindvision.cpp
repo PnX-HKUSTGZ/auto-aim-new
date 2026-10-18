@@ -4,6 +4,7 @@
 
 #include <stdexcept>
 
+#include "tools/exiter.hpp"
 #include "tools/logger.hpp"
 
 using namespace std::chrono_literals;
@@ -53,10 +54,20 @@ MindVision::~MindVision()
 void MindVision::read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
 {
   CameraData data;
-  queue_.pop(data);
+  while (!tools::exit_requested()) {
+    if (queue_.pop_for(data, 100ms)) {
+      last_ = data;
+      img = data.img;
+      timestamp = data.timestamp;
+      return;
+    }
+  }
 
-  img = data.img;
-  timestamp = data.timestamp;
+  // 退出中：返回最后一帧，避免调用方拿到空图。
+  if (!last_.img.empty()) {
+    img = last_.img;
+    timestamp = last_.timestamp;
+  }
 }
 
 void MindVision::open()

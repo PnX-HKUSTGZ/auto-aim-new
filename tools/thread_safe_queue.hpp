@@ -1,6 +1,7 @@
 #ifndef TOOLS__THREAD_SAFE_QUEUE_HPP
 #define TOOLS__THREAD_SAFE_QUEUE_HPP
 
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <iostream>
@@ -69,6 +70,33 @@ public:
     not_empty_condition_.wait(lock, [this] { return !queue_.empty(); });
 
     return queue_.front();
+  }
+
+  // 带超时的 pop：返回 false 表示超时。供需要响应退出信号的阻塞点轮询。
+  template <typename Rep, typename Period>
+  bool pop_for(T & value, const std::chrono::duration<Rep, Period> & timeout)
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!not_empty_condition_.wait_for(lock, timeout, [this] { return !queue_.empty(); })) {
+      return false;
+    }
+
+    value = std::move(queue_.front());
+    queue_.pop();
+    return true;
+  }
+
+  // 带超时的 front：不消费队列，返回 false 表示超时。
+  template <typename Rep, typename Period>
+  bool front_for(T & value, const std::chrono::duration<Rep, Period> & timeout)
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!not_empty_condition_.wait_for(lock, timeout, [this] { return !queue_.empty(); })) {
+      return false;
+    }
+
+    value = queue_.front();
+    return true;
   }
 
   void back(T & value)

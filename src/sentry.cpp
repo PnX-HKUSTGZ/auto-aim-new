@@ -1,9 +1,12 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
+#include <string>
 #include <thread>
+#include <unistd.h>
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
@@ -19,6 +22,7 @@
 #include "tasks/omniperception/decider.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
+#include "tools/instance_lock.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
@@ -33,6 +37,15 @@ const std::string keys =
 int main(int argc, char * argv[])
 {
   tools::Exiter exiter;
+
+  // 单实例：第二个进程在碰硬件之前直接退出，避免抢串口/相机。
+  const std::string lock_path = "/tmp/sentry_autoaim_" + std::to_string(::getuid()) + ".lock";
+  tools::InstanceLock instance_lock(lock_path);
+  if (!instance_lock.acquired()) {
+    std::fprintf(stderr, "[sentry] %s\n", instance_lock.error().c_str());
+    return 1;
+  }
+
   tools::Plotter plotter;
   tools::Recorder recorder;
 
@@ -44,8 +57,13 @@ int main(int argc, char * argv[])
   auto config_path = cli.get<std::string>(0);
 
   io::Gimbal gimbal(config_path);
+  if (exiter.exit()) return 0;
+
   io::ROS2 ros2(gimbal);
+  if (exiter.exit()) return 0;
+
   io::Camera camera(config_path);
+  if (exiter.exit()) return 0;
   // io::USBCamera usbcam1("/dev/usbcam_left", config_path);
   // io::USBCamera usbcam2("/dev/usbcam_right", config_path);
   // io::USBCamera back_camera("/dev/usbcam_back", config_path);
@@ -67,6 +85,7 @@ int main(int argc, char * argv[])
 
   while (!exiter.exit()) {
     camera.read(img, timestamp);
+    if (exiter.exit()) break;
     frame_count++;
     auto now = steady_clock::now();
     auto elapsed = duration_cast<milliseconds>(now - last_fps_time).count();
@@ -77,6 +96,7 @@ int main(int argc, char * argv[])
     }
 
     Eigen::Quaterniond q = gimbal.q(timestamp);
+    if (exiter.exit()) break;
     auto gs = gimbal.state();
     // recorder.record(img, q, timestamp);
 

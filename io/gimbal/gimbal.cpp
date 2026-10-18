@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "tools/crc.hpp"
+#include "tools/exiter.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
@@ -83,8 +84,16 @@ Gimbal::Gimbal(const std::string & config_path)
   read_thread_ = std::thread(&Gimbal::read_thread, this);
   tx_thread_ = std::thread(&Gimbal::tx_loop, this);
 
-  queue_.pop();
-  tools::logger()->info("[Gimbal] First q received.");
+  // 等第一帧；用带超时的 pop 轮询退出标志，避免 Ctrl+C 被 condition_variable 吞掉。
+  std::tuple<Eigen::Quaterniond, Clock::time_point> first;
+  while (!tools::exit_requested()) {
+    if (queue_.pop_for(first, std::chrono::milliseconds(100))) {
+      tools::logger()->info("[Gimbal] First q received.");
+      return;
+    }
+  }
+
+  tools::logger()->info("[Gimbal] Exit requested before first frame.");
 }
 
 Gimbal::~Gimbal()
@@ -93,6 +102,21 @@ Gimbal::~Gimbal()
   tx_cv_.notify_all();
   if (tx_thread_.joinable()) tx_thread_.join();
   if (read_thread_.joinable()) read_thread_.join();
+
+  // 尽力在关闭串口前让 MCU 停止，避免它保持最后一拍控制量直到自己的 watchdog 超时。
+  if (serial_.isOpen()) {
+    try {
+      VisionToGimbal stop{};
+      stop.mode = 0;
+      write_serial_packet(serial_, stop);
+
+      NavToGimbalV2 nav_stop{};
+      write_serial_packet(serial_, nav_stop);
+    } catch (...) {
+      // 退出路径上不再重连或抛出。
+    }
+  }
+
   serial_.close();
 }
 
@@ -132,18 +156,34 @@ std::string Gimbal::str(GimbalMode mode) const
 
 Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
 {
-  while (true) {
-    auto [q_a, t_a] = queue_.pop();
-    auto [q_b, t_b] = queue_.front();
+  while (!tools::exit_requested()) {
+    std::tuple<Eigen::Quaterniond, Clock::time_point> a, b;
+    if (!queue_.pop_for(a, std::chrono::milliseconds(100))) continue;
+    if (!queue_.front_for(b, std::chrono::milliseconds(100))) continue;
+
+    auto [q_a, t_a] = a;
+    auto [q_b, t_b] = b;
     auto t_ab = tools::delta_time(t_a, t_b);
+    if (t_ab <= 0.0) {
+      last_q_ = q_a;
+      return q_a;
+    }
+
     auto t_ac = tools::delta_time(t_a, t);
     auto k = t_ac / t_ab;
     Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
-    if (t < t_a) return q_c;
+    if (t < t_a) {
+      last_q_ = q_c;
+      return q_c;
+    }
     if (!(t_a < t && t <= t_b)) continue;
 
+    last_q_ = q_c;
     return q_c;
   }
+
+  // 仅退出路径返回最后一帧姿态；调用方应立即检查 exiter.exit() 并跳出循环。
+  return last_q_;
 }
 
 void Gimbal::send(const VisionToGimbal & command)
@@ -268,10 +308,10 @@ void Gimbal::read_thread()
       continue;
     }
 
-    // 统一帧（协议 v1）：0xAA 开头、变长。
+    // 统一帧（协议 v1）：0xAA 开头、变长。只有完整合法的帧才清零错误计数，
+    // 否则线上杂散的 0xAA 会让重连阈值永远达不到。
     if (header == kFrameMagic) {
-      read_unified_frame();
-      error_count = 0;
+      if (read_unified_frame()) error_count = 0;
       continue;
     }
 
@@ -343,12 +383,12 @@ void Gimbal::read_thread()
   tools::logger()->info("[Gimbal] read_thread stopped.");
 }
 
-void Gimbal::read_unified_frame()
+bool Gimbal::read_unified_frame()
 {
   uint8_t head[4];
   if (!read(head, sizeof(head))) {
     tools::logger()->debug("[Gimbal] unified header read failed.");
-    return;
+    return false;
   }
 
   const uint8_t version = head[0];
@@ -356,19 +396,19 @@ void Gimbal::read_unified_frame()
   const uint16_t length = static_cast<uint16_t>(head[2]) | (static_cast<uint16_t>(head[3]) << 8);
   if (version != kFrameVersion || length > kFrameMaxPayload) {
     tools::logger()->debug("[Gimbal] unified frame version/length invalid.");
-    return;
+    return false;
   }
 
   uint8_t payload[kFrameMaxPayload]{};
   if (length > 0 && !read(payload, length)) {
     tools::logger()->debug("[Gimbal] unified payload read failed.");
-    return;
+    return false;
   }
 
   uint8_t crc_bytes[2];
   if (!read(crc_bytes, sizeof(crc_bytes))) {
     tools::logger()->debug("[Gimbal] unified crc read failed.");
-    return;
+    return false;
   }
 
   uint8_t buffer[4 + kFrameMaxPayload + 2];
@@ -383,10 +423,11 @@ void Gimbal::read_unified_frame()
   // CRC 覆盖 version..payload（偏移 1 ~ 4+length），check_crc16 的 len 含末尾 crc。
   if (!tools::check_crc16(buffer, static_cast<uint32_t>(6 + length))) {
     tools::logger()->debug("[Gimbal] unified frame CRC16 check failed.");
-    return;
+    return false;
   }
 
   handle_unified_frame(type, payload, length);
+  return true;
 }
 
 void Gimbal::handle_unified_frame(uint8_t type, const uint8_t * payload, uint16_t length)

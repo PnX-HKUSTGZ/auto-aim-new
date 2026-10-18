@@ -223,6 +223,7 @@ private:
 
   GimbalMode mode_ = GimbalMode::IDLE;
   GimbalState state_{};
+  Eigen::Quaterniond last_q_ = Eigen::Quaterniond::Identity();
   RefereeState referee_state_{};
   tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
     queue_{1000};
@@ -261,7 +262,7 @@ private:
 
   bool read(uint8_t * buffer, size_t size);
   void read_thread();
-  void read_unified_frame();
+  bool read_unified_frame();
   void handle_unified_frame(uint8_t type, const uint8_t * payload, uint16_t length);
   void tx_loop();
   bool write_packet(VisionToGimbal packet);

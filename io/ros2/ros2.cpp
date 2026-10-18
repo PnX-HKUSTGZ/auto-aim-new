@@ -4,7 +4,11 @@ namespace io
 {
 ROS2::ROS2()
 {
-  if (!rclcpp::ok()) rclcpp::init(0, nullptr);
+  // 信号统一由 tools::Exiter 处理；若交给 rclcpp，它会覆盖 SIGINT/SIGTERM 处理器，
+  // 只 shutdown 不退出，导致主循环永远看不到退出请求。
+  if (!rclcpp::ok()) {
+    rclcpp::init(0, nullptr, rclcpp::InitOptions(), rclcpp::SignalHandlerOptions::None);
+  }
 
   publish2nav_ = std::make_shared<Publish2Nav>();
   publish_spin_thread_ = std::make_unique<std::thread>([this]() { publish2nav_->start(); });

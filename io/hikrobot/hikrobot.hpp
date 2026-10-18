@@ -38,6 +38,7 @@ private:
   std::atomic<bool> capturing_;
   std::atomic<bool> capture_quit_;
   tools::ThreadSafeQueue<CameraData> queue_;
+  CameraData last_;
 
   int vid_, pid_;
 
