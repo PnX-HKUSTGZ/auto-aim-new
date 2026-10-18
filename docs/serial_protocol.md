@@ -55,8 +55,8 @@
 | 23 | uint32 | `sentry_info_1` | 0x020D 兑换 / 复活原始值 |
 | 27 | uint16 | `sentry_info_2` | 0x020D 脱战 / 姿态原始值 |
 
-- `event_code` / `sentry_info_1` / `sentry_info_2`：MCU **只转发原始整数，不解析**，位段含义在决策侧。
-- 本版暂不发送：`sentry_info_3`、雷达、队友位置、手动点等。
+- `event_code` / `sentry_info_1` / `sentry_info_2`：MCU **直接转发原始字节，不用解析**，由上位机进行解析和处理。
+（本版暂不发送：`sentry_info_3`、雷达、队友位置、手动点等）
 
 ### 2.3 `type=0x02` 下行：决策命令（payload 12 B）
 
@@ -67,6 +67,8 @@
 | 5 | uint8 | `mode` | 0 一次性 / 1 轮询（电平） |
 | 6 | uint16 | `interval_ms` | 仅 `mode=1`，重发间隔 |
 | 8 | int32 | `value` | 数量 / 次数 |
+
+以下是 `kind` 字段的取值说明：
 
 | `kind` | 动作 | 说明 |
 | --- | --- | --- |
