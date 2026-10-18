@@ -18,15 +18,40 @@ HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
   daemon_thread_ = std::thread{[this] {
     tools::logger()->info("HikRobot's daemon thread started.");
 
+    // 分片等待，退出时不会被 2s 的复位等待拖住。
+    auto wait_for = [this](std::chrono::milliseconds total) {
+      const auto step = 100ms;
+      for (auto elapsed = 0ms; elapsed < total; elapsed += step) {
+        if (daemon_quit_) return false;
+        std::this_thread::sleep_for(step);
+      }
+      return !daemon_quit_;
+    };
+
     capture_start();
 
+    int failures = 0;
     while (!daemon_quit_) {
       std::this_thread::sleep_for(100ms);
 
-      if (capturing_) continue;
+      if (capturing_) {
+        failures = 0;
+        continue;
+      }
 
       capture_stop();
-      reset_usb();
+      ++failures;
+
+      // 不要每 100ms 复位一次：先快速重试，连续失败 5 次才复位 USB，
+      // 并给设备留出重新枚举的时间（U3V 复位后通常需要 1~2s）。
+      if (failures % 5 == 0) {
+        tools::logger()->warn("[HikRobot] {} consecutive failures, resetting USB", failures);
+        reset_usb();
+        if (!wait_for(2000ms)) break;
+      } else if (!wait_for(400ms)) {
+        break;
+      }
+
       capture_start();
     }
 
@@ -72,17 +97,28 @@ void HikRobot::capture_start()
   MV_CC_DEVICE_INFO_LIST device_list;
   ret = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
   if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_EnumDevices failed: {:#x}", ret);
+    // 相机掉线时该错误会持续出现，限流避免刷屏。
+    ++enum_fail_count_;
+    if (enum_fail_count_ == 1 || enum_fail_count_ % 10 == 0) {
+      tools::logger()->warn(
+        "MV_CC_EnumDevices failed: {:#x} ({} consecutive)", ret, enum_fail_count_);
+    }
     return;
   }
 
   if (device_list.nDeviceNum == 0) {
-    tools::logger()->warn("Not found camera!");
+    ++enum_fail_count_;
+    if (enum_fail_count_ == 1 || enum_fail_count_ % 10 == 0) {
+      tools::logger()->warn("Not found camera! ({} consecutive)", enum_fail_count_);
+    }
     return;
   }
 
+  enum_fail_count_ = 0;
+
   ret = MV_CC_CreateHandle(&handle_, device_list.pDeviceInfo[0]);
   if (ret != MV_OK) {
+    handle_ = nullptr;
     tools::logger()->warn("MV_CC_CreateHandle failed: {:#x}", ret);
     return;
   }
@@ -90,6 +126,7 @@ void HikRobot::capture_start()
   ret = MV_CC_OpenDevice(handle_);
   if (ret != MV_OK) {
     tools::logger()->warn("MV_CC_OpenDevice failed: {:#x}", ret);
+    release_handle();
     return;
   }
 
@@ -111,6 +148,7 @@ void HikRobot::capture_start()
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
     tools::logger()->warn("MV_CC_StartGrabbing failed: {:#x}", ret);
+    release_handle();
     return;
   }
 
@@ -178,26 +216,25 @@ void HikRobot::capture_stop()
 {
   capture_quit_ = true;
   if (capture_thread_.joinable()) capture_thread_.join();
+  release_handle();
+}
 
-  unsigned int ret;
+void HikRobot::release_handle()
+{
+  if (handle_ == nullptr) return;
 
-  ret = MV_CC_StopGrabbing(handle_);
-  if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_StopGrabbing failed: {:#x}", ret);
-    return;
+  // 清理路径每步都执行，不因某一步失败提前返回，避免设备资源泄漏。
+  if (MV_CC_StopGrabbing(handle_) != MV_OK) {
+    tools::logger()->debug("[HikRobot] stop grabbing during cleanup failed");
+  }
+  if (MV_CC_CloseDevice(handle_) != MV_OK) {
+    tools::logger()->debug("[HikRobot] close device during cleanup failed");
+  }
+  if (MV_CC_DestroyHandle(handle_) != MV_OK) {
+    tools::logger()->warn("[HikRobot] destroy handle failed");
   }
 
-  ret = MV_CC_CloseDevice(handle_);
-  if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_CloseDevice failed: {:#x}", ret);
-    return;
-  }
-
-  ret = MV_CC_DestroyHandle(handle_);
-  if (ret != MV_OK) {
-    tools::logger()->warn("MV_CC_DestroyHandle failed: {:#x}", ret);
-    return;
-  }
+  handle_ = nullptr;
 }
 
 void HikRobot::set_float_value(const std::string & name, double value)

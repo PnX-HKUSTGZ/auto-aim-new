@@ -33,7 +33,8 @@ private:
   std::thread daemon_thread_;
   std::atomic<bool> daemon_quit_;
 
-  void * handle_;
+  void * handle_ = nullptr;
+  int enum_fail_count_ = 0;
   std::thread capture_thread_;
   std::atomic<bool> capturing_;
   std::atomic<bool> capture_quit_;
@@ -44,6 +45,7 @@ private:
 
   void capture_start();
   void capture_stop();
+  void release_handle();
 
   void set_float_value(const std::string & name, double value);
   void set_bool_value(const std::string & name, bool value);
