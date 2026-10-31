@@ -88,7 +88,6 @@ constexpr uint8_t kFrameMagic = 0xAA;
 constexpr uint8_t kFrameVersion = 0x01;
 constexpr uint8_t kFrameTypeRefereeUplink = 0x01;
 constexpr uint8_t kFrameTypeDecisionCommand = 0x02;
-constexpr uint8_t kFrameTypeDecisionAck = 0x03;
 constexpr uint16_t kFrameMaxPayload = 64;
 
 // type=0x01：MCU 上行裁判 / 自身（29 字节）。
@@ -112,27 +111,16 @@ struct __attribute__((packed)) RefereeUplinkPayload
 static_assert(sizeof(RefereeUplinkPayload) == 29, "RefereeUplinkPayload layout mismatch");
 static_assert(std::is_trivially_copyable_v<RefereeUplinkPayload>);
 
-// type=0x02：上位机下行决策命令（12 字节）。
+// type=0x02：上位机下行决策命令（9 字节）。
+// value 是 0x0120 的累计目标值 / 复活电平位，重复下发幂等；上位机靠裁判上行校验生效。
 struct __attribute__((packed)) DecisionCommand
 {
   uint32_t request_id = 0;
   uint8_t kind = 0;
-  uint8_t mode = 0;  // 0: one-shot / 1: polled
-  uint16_t interval_ms = 0;
   int32_t value = 0;
 };
-static_assert(sizeof(DecisionCommand) == 12, "DecisionCommand layout mismatch");
+static_assert(sizeof(DecisionCommand) == 9, "DecisionCommand layout mismatch");
 static_assert(std::is_trivially_copyable_v<DecisionCommand>);
-
-// type=0x03：MCU 上行执行回执（6 字节）。
-struct __attribute__((packed)) DecisionAck
-{
-  uint32_t request_id = 0;
-  uint8_t accepted = 0;
-  uint8_t code = 0;
-};
-static_assert(sizeof(DecisionAck) == 6, "DecisionAck layout mismatch");
-static_assert(std::is_trivially_copyable_v<DecisionAck>);
 
 enum class GimbalMode
 {
@@ -204,9 +192,6 @@ public:
   // 下行决策命令：入队后由 tx 线程按协议 v1 组帧发送。队列满返回 false。
   bool send_decision_command(const DecisionCommand & command);
 
-  // 取出自上次调用以来收到的执行回执；无则返回 false。
-  bool pop_decision_ack(DecisionAck * out);
-
 private:
   using Clock = std::chrono::steady_clock;
 
@@ -243,7 +228,6 @@ private:
   Clock::time_point vision_next_send_at_{};
   Clock::time_point nav_next_send_at_{};
   std::deque<DecisionCommand> decision_cmd_queue_;  // 由 tx_mutex_ 保护
-  std::deque<DecisionAck> ack_queue_;                // 由 state_mutex_ 保护
 
   Clock::duration vision_min_period_ = std::chrono::milliseconds(10);
   Clock::duration nav_min_period_ = std::chrono::milliseconds(20);

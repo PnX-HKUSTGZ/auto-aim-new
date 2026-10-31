@@ -264,15 +264,6 @@ bool Gimbal::send_decision_command(const DecisionCommand & command)
   return true;
 }
 
-bool Gimbal::pop_decision_ack(DecisionAck * out)
-{
-  std::lock_guard<std::mutex> lock(state_mutex_);
-  if (ack_queue_.empty()) return false;
-  *out = ack_queue_.front();
-  ack_queue_.pop_front();
-  return true;
-}
-
 bool Gimbal::read(uint8_t * buffer, size_t size)
 {
   try {
@@ -454,13 +445,6 @@ void Gimbal::handle_unified_frame(uint8_t type, const uint8_t * payload, uint16_
     referee_state_.event_code = packet.event_code;
     referee_state_.sentry_info_1 = packet.sentry_info_1;
     referee_state_.sentry_info_2 = packet.sentry_info_2;
-  } else if (type == kFrameTypeDecisionAck && length == sizeof(DecisionAck)) {
-    DecisionAck ack;
-    std::memcpy(&ack, payload, sizeof(ack));
-
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    ack_queue_.push_back(ack);
-    if (ack_queue_.size() > 64) ack_queue_.pop_front();
   }
 }
 
